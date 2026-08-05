@@ -1,6 +1,6 @@
 # Deploy por CLI:  wrangler deploy
 # (ou ignore este arquivo e cole o worker.js no painel do Cloudflare)
-name = "pi-mainnet"
+name = "pi-metrics"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
