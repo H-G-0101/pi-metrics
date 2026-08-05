@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pi Mainnet · Painel de rede</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ---------------------------------------------------------------
+     CONFIG — edite aqui. Se der erro de CORS no fetch direto,
+     troque HORIZON pela URL do seu Cloudflare Worker (proxy).
+     SUPPLY_URL: aponte pro seu Worker que serve o JSON de supply.
+     --------------------------------------------------------------- */
+  :root{
+    --bg:#0A0D18;
+    --bg2:#0E1222;
+    --surface:#141A30;
+    --surface2:#1B2340;
+    --line:#242D4D;
+    --ink:#EAECF6;
+    --muted:#7B84A3;
+    --pi:#A855F7;         /* roxo Pi — accent principal */
+    --pi-dim:#6D4AA8;
+    --live:#4ADE80;       /* verde: livre / online */
+    --lock:#F5B84B;       /* âmbar: travado */
+    --bad:#F0637A;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+    --disp:'Space Grotesk',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    background:
+      radial-gradient(1100px 600px at 78% -8%, rgba(168,85,247,.14), transparent 60%),
+      radial-gradient(900px 500px at -5% 110%, rgba(74,222,128,.06), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--disp);
+    line-height:1.4;
+    min-height:100vh;
+    padding:clamp(16px,4vw,44px);
+  }
+  a{color:var(--pi)}
+
+  /* ---- header ---- */
+  header{
+    display:flex;flex-wrap:wrap;align-items:baseline;gap:14px 22px;
+    padding-bottom:22px;margin-bottom:26px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex;align-items:center;gap:13px}
+  .glyph{
+    font-size:30px;font-weight:700;color:var(--pi);
+    width:46px;height:46px;display:grid;place-items:center;
+    border:1px solid var(--pi-dim);border-radius:13px;
+    background:linear-gradient(160deg,rgba(168,85,247,.18),transparent);
+    box-shadow:0 0 0 0 rgba(168,85,247,.5);
+  }
+  .glyph.beat{animation:beat .9s ease-out}
+  @keyframes beat{
+    0%{box-shadow:0 0 0 0 rgba(168,85,247,.55)}
+    100%{box-shadow:0 0 0 18px rgba(168,85,247,0)}
+  }
+  h1{font-size:clamp(18px,2.4vw,23px);font-weight:700;letter-spacing:-.02em}
+  h1 span{color:var(--muted);font-weight:400}
+  .status{
+    margin-left:auto;display:flex;align-items:center;gap:9px;
+    font-family:var(--mono);font-size:12.5px;color:var(--muted);
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+  .dot.on{background:var(--live);box-shadow:0 0 9px var(--live)}
+  .dot.off{background:var(--bad);box-shadow:0 0 9px var(--bad)}
+  .dot.on{animation:blink 2s ease-in-out infinite}
+  @keyframes blink{50%{opacity:.35}}
+
+  /* ---- grid ---- */
+  .grid{
+    display:grid;gap:14px;
+    grid-template-columns:repeat(auto-fit,minmax(215px,1fr));
+    margin-bottom:26px;
+  }
+  .card{
+    background:linear-gradient(180deg,var(--surface),var(--bg2));
+    border:1px solid var(--line);border-radius:16px;
+    padding:19px 20px;position:relative;overflow:hidden;
+  }
+  .card.wide{grid-column:1/-1}
+  .eyebrow{
+    font-family:var(--mono);font-size:11px;letter-spacing:.13em;
+    text-transform:uppercase;color:var(--muted);margin-bottom:12px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .metric{font-family:var(--mono);font-weight:600;letter-spacing:-.01em}
+  .metric.big{font-size:clamp(27px,4vw,38px);line-height:1}
+  .metric.mid{font-size:22px}
+  .sub{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:9px}
+  .flash{animation:flash .7s ease-out}
+  @keyframes flash{0%{color:var(--pi)}100%{color:var(--ink)}}
+
+  /* ---- ledger pulse strip (signature) ---- */
+  .pulse-wrap{margin-bottom:26px}
+  .pulse{
+    height:64px;border:1px solid var(--line);border-radius:16px;
+    background:var(--bg2);position:relative;overflow:hidden;
+    display:flex;align-items:center;padding:0 20px;gap:16px;
+  }
+  .pulse .label{font-family:var(--mono);font-size:11px;letter-spacing:.13em;
+    text-transform:uppercase;color:var(--muted);z-index:2;white-space:nowrap}
+  .pulse .track{position:absolute;inset:0;display:flex;align-items:center}
+  .ripple{
+    position:absolute;top:50%;left:24px;width:10px;height:10px;
+    border-radius:50%;background:var(--pi);transform:translateY(-50%);
+    opacity:0;
+  }
+  .ripple.go{animation:ripple 1.1s ease-out}
+  @keyframes ripple{
+    0%{opacity:.9;box-shadow:0 0 0 0 rgba(168,85,247,.5)}
+    100%{opacity:0;box-shadow:0 0 0 34px rgba(168,85,247,0)}
+  }
+  .bars{display:flex;align-items:flex-end;gap:3px;height:34px;margin-left:auto;z-index:2}
+  .bars i{width:4px;background:var(--pi-dim);border-radius:2px;height:20%;
+    transition:height .4s ease,background .4s ease}
+
+  /* ---- lookup ---- */
+  .look{
+    background:var(--surface);border:1px solid var(--line);border-radius:16px;
+    padding:22px;margin-bottom:14px;
+  }
+  .look h2{font-size:16px;font-weight:700;margin-bottom:5px}
+  .look p{color:var(--muted);font-size:13.5px;margin-bottom:16px;max-width:62ch}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  input[type=text]{
+    flex:1;min-width:220px;background:var(--bg);border:1px solid var(--line);
+    border-radius:11px;padding:13px 15px;color:var(--ink);
+    font-family:var(--mono);font-size:13.5px;
+  }
+  input[type=text]:focus{outline:2px solid var(--pi);outline-offset:1px;border-color:transparent}
+  button{
+    background:var(--pi);color:#0A0D18;border:0;border-radius:11px;
+    padding:13px 22px;font-family:var(--disp);font-weight:700;font-size:14px;
+    cursor:pointer;transition:filter .15s,transform .05s;
+  }
+  button:hover{filter:brightness(1.08)}
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+  .result{margin-top:18px;display:none}
+  .result.show{display:block}
+  .bal-row{
+    display:flex;justify-content:space-between;align-items:center;gap:12px;
+    padding:12px 0;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:14px;
+  }
+  .bal-row:last-child{border-bottom:0}
+  .bal-row .k{color:var(--muted);font-size:12.5px}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 9px;border-radius:20px;
+    border:1px solid currentColor}
+  .tag.free{color:var(--live)}
+  .tag.locked{color:var(--lock)}
+
+  /* ---- supply (needs backend) ---- */
+  .empty{color:var(--muted);font-family:var(--mono);font-size:13px}
+  .stack{display:flex;height:12px;border-radius:6px;overflow:hidden;margin:14px 0 6px;background:var(--surface2)}
+  .stack i{height:100%}
+
+  .err{color:var(--bad);font-family:var(--mono);font-size:12.5px;margin-top:8px;display:none}
+  .err.show{display:block}
+
+  footer{
+    margin-top:30px;padding-top:18px;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:11.5px;color:var(--muted);
+    display:flex;flex-wrap:wrap;gap:6px 18px;
+  }
+  code{background:var(--surface2);padding:1px 6px;border-radius:5px;color:var(--ink)}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+  }
+  @media(max-width:520px){
+    .status{margin-left:0;width:100%}
+    header{gap:10px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="glyph" id="glyph">π</div>
+    <h1>Pi Mainnet <span>· painel de rede</span></h1>
+  </div>
+  <div class="status">
+    <span class="dot" id="dot"></span>
+    <span id="statusText">conectando…</span>
+  </div>
+</header>
+
+<!-- SIGNATURE: pulso a cada novo ledger -->
+<div class="pulse-wrap">
+  <div class="pulse">
+    <span class="label">batimento de ledger</span>
+    <span class="ripple" id="ripple"></span>
+    <div class="bars" id="bars"></div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="eyebrow">altura do ledger</div>
+    <div class="metric big" id="height">—</div>
+    <div class="sub" id="heightSub">último bloco</div>
+  </div>
+  <div class="card">
+    <div class="eyebrow">último fechamento</div>
+    <div class="metric big" id="age">—</div>
+    <div class="sub">tempo desde o bloco</div>
+  </div>
+  <div class="card">
+    <div class="eyebrow">tx · último ledger</div>
+    <div class="metric big" id="tx">—</div>
+    <div class="sub" id="ops">— operações</div>
+  </div>
+  <div class="card">
+    <div class="eyebrow">throughput recente</div>
+    <div class="metric big" id="tps">—</div>
+    <div class="sub">tx/s · janela de 10 ledgers</div>
+  </div>
+  <div class="card">
+    <div class="eyebrow">taxa base</div>
+    <div class="metric mid" id="fee">—</div>
+    <div class="sub">stroops por operação</div>
+  </div>
+  <div class="card">
+    <div class="eyebrow">protocolo</div>
+    <div class="metric mid" id="proto">—</div>
+    <div class="sub">versão do core</div>
+  </div>
+</div>
+
+<!-- SUPPLY: precisa de backend/snapshot -->
+<div class="card wide" style="margin-bottom:26px">
+  <div class="eyebrow">supply migrado</div>
+  <div id="supplyBody">
+    <p class="empty">Supply agregado (migrado / travado / livre) não sai do Horizon direto —
+    exige indexar as contas. Configure <code>SUPPLY_URL</code> no topo do arquivo apontando
+    pro seu Worker, que deve servir um JSON: <code>{migrated, locked, unlocked}</code> em Pi.</p>
+  </div>
+</div>
+
+<!-- MIGRAÇÃO: lê o JSON do migracao-stats.mjs -->
+<div class="card wide" style="margin-bottom:26px">
+  <div class="eyebrow">2ª migração <span id="migStamp" style="color:var(--pi-dim)"></span></div>
+  <div id="migBody">
+    <p class="empty">Estatística de quem já recebeu a 2ª migração. Rode o
+    <code>migracao-stats.mjs</code> e sirva o <code>migracao-stats.json</code> pelo seu Worker;
+    aponte <code>MIGRATION_URL</code> no topo do arquivo.</p>
+  </div>
+</div>
+
+<!-- LOOKUP de conta -->
+<div class="look">
+  <h2>Consultar carteira</h2>
+  <p>Cole um endereço público da mainnet (começa com <code>G…</code>) pra ver o saldo e os
+  lockups — a parte da migração que dá pra verificar por conta, on-chain.</p>
+  <div class="row">
+    <input type="text" id="addr" placeholder="GABC...XYZ" spellcheck="false" autocomplete="off">
+    <button id="lookBtn">Consultar</button>
+  </div>
+  <div class="err" id="lookErr"></div>
+  <div class="result" id="lookResult"></div>
+</div>
+
+<footer>
+  <span>fonte: Horizon do Pi mainnet</span>
+  <span id="epLabel"></span>
+  <span>atualiza a cada <span id="pollLabel"></span>s</span>
+</footer>
+
+<script>
+/* ================= CONFIG ================= */
+const CONFIG = {
+  // Fetch direto. Se o console acusar CORS, troque pela URL do seu Cloudflare Worker.
+  HORIZON: '/horizon',
+  // Opcional: seu Worker servindo {migrated, locked, unlocked} em Pi. Deixe '' se não tiver.
+  SUPPLY_URL: '',
+  // Opcional: JSON gerado pelo migracao-stats.mjs (servido pelo seu Worker). Deixe '' se não tiver.
+  MIGRATION_URL: '/stats',
+  POLL_MS: 6000,
+};
+/* ========================================== */
+
+const $ = id => document.getElementById(id);
+const fmt = n => n==null ? '—' : Number(n).toLocaleString('pt-BR');
+const fmtPi = n => n==null ? '—' : Number(n).toLocaleString('pt-BR',{maximumFractionDigits:0});
+
+let lastHeight = null;
+let barVals = Array(28).fill(0.2);
+
+// desenha as barrinhas do batimento
+(function initBars(){
+  const b = $('bars');
+  for(let i=0;i<28;i++){ const el=document.createElement('i'); b.appendChild(el); }
+})();
+function pushBar(v){
+  barVals.push(Math.max(.12, Math.min(1, v)));
+  barVals.shift();
+  const bars = $('bars').children;
+  for(let i=0;i<bars.length;i++){
+    const h = barVals[i]*100;
+    bars[i].style.height = h+'%';
+    bars[i].style.background = barVals[i] > .6 ? 'var(--pi)' : 'var(--pi-dim)';
+  }
+}
+
+function setStatus(state, text){
+  const dot=$('dot');
+  dot.className='dot '+(state==='on'?'on':state==='off'?'off':'');
+  $('statusText').textContent=text;
+}
+
+function flash(el){ el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+
+function newLedgerPulse(){
+  const r=$('ripple'); r.classList.remove('go'); void r.offsetWidth; r.classList.add('go');
+  const g=$('glyph'); g.classList.remove('beat'); void g.offsetWidth; g.classList.add('beat');
+}
+
+function agoText(iso){
+  const s = Math.max(0, (Date.now()-new Date(iso).getTime())/1000);
+  return s<60 ? s.toFixed(0)+'s' : (s/60).toFixed(1)+'min';
+}
+
+async function tick(){
+  try{
+    const res = await fetch(`${CONFIG.HORIZON}/ledgers?order=desc&limit=10`, {headers:{'Accept':'application/json'}});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    const recs = data._embedded.records;
+    const cur = recs[0];
+
+    // throughput na janela
+    const first=recs[recs.length-1], last=recs[0];
+    const span=(new Date(last.closed_at)-new Date(first.closed_at))/1000 || 1;
+    const totalTx=recs.reduce((a,r)=>a+(r.successful_transaction_count||0),0);
+    const tps=(totalTx/span);
+
+    setStatus('on','online');
+    $('epLabel').textContent = new URL(CONFIG.HORIZON, location.href).host;
+
+    const h=Number(cur.sequence);
+    if(h!==lastHeight){
+      $('height').textContent=fmt(h);
+      flash($('height'));
+      newLedgerPulse();
+      pushBar((cur.successful_transaction_count||0)/8 + .2);
+      lastHeight=h;
+    }
+    $('heightSub').textContent = 'fechado às '+new Date(cur.closed_at).toLocaleTimeString('pt-BR');
+    $('age').textContent=agoText(cur.closed_at);
+    $('tx').textContent=fmt(cur.successful_transaction_count);
+    $('ops').textContent=fmt(cur.operation_count)+' operações';
+    $('tps').textContent=tps.toFixed(2);
+    $('fee').textContent=fmt(cur.base_fee_in_stroops);
+    $('proto').textContent='v'+cur.protocol_version;
+
+  }catch(e){
+    setStatus('off','sem conexão');
+    console.warn('Horizon:', e.message,
+      '\nSe for CORS: aponte CONFIG.HORIZON pro seu Cloudflare Worker (proxy).');
+  }
+}
+
+async function loadSupply(){
+  if(!CONFIG.SUPPLY_URL) return;
+  try{
+    const r=await fetch(CONFIG.SUPPLY_URL); const s=await r.json();
+    const total=s.migrated||((s.locked||0)+(s.unlocked||0));
+    const lp=total?((s.locked||0)/total*100):0, up=100-lp;
+    $('supplyBody').innerHTML=`
+      <div class="row" style="gap:26px;align-items:baseline">
+        <div><div class="metric big">${fmtPi(total)}</div><div class="sub">Pi migrado pra mainnet</div></div>
+      </div>
+      <div class="stack">
+        <i style="width:${lp}%;background:var(--lock)"></i>
+        <i style="width:${up}%;background:var(--live)"></i>
+      </div>
+      <div class="row" style="justify-content:space-between;font-family:var(--mono);font-size:12.5px;color:var(--muted)">
+        <span style="color:var(--lock)">■ travado ${fmtPi(s.locked)} (${lp.toFixed(1)}%)</span>
+        <span style="color:var(--live)">■ livre ${fmtPi(s.unlocked)} (${up.toFixed(1)}%)</span>
+      </div>`;
+  }catch(e){ /* mantém empty state */ }
+}
+
+async function loadMigration(){
+  if(!CONFIG.MIGRATION_URL) return;
+  try{
+    const r=await fetch(CONFIG.MIGRATION_URL); const s=await r.json();
+    const got=s.receivedSecondMigration||0, only=s.onlyFirst||0;
+    const pct=s.pctSecond!=null ? s.pctSecond : (s.uniqueRecipients?got/s.uniqueRecipients*100:0);
+    const rest=100-pct;
+    if(s.generatedAt) $('migStamp').textContent='· '+new Date(s.generatedAt).toLocaleString('pt-BR');
+    // distribuição (paymentsPerRecipient) — barrinhas compactas
+    const dist=s.paymentsPerRecipient||{};
+    const keys=Object.keys(dist).map(Number).sort((a,b)=>a-b).slice(0,6);
+    const maxV=Math.max(1,...keys.map(k=>dist[k]));
+    const distBars=keys.map(k=>`
+      <div style="text-align:center;flex:1">
+        <div style="height:38px;display:flex;align-items:flex-end;justify-content:center">
+          <div style="width:60%;border-radius:3px 3px 0 0;background:${k>=2?'var(--pi)':'var(--pi-dim)'};height:${dist[k]/maxV*100}%"></div>
+        </div>
+        <div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:5px">${k}×</div>
+      </div>`).join('');
+    $('migBody').innerHTML=`
+      <div class="row" style="gap:30px;align-items:baseline;flex-wrap:wrap">
+        <div><div class="metric big" style="color:var(--pi)">${pct.toFixed(1)}%</div>
+          <div class="sub">dos destinatários já receberam a 2ª</div></div>
+        <div><div class="metric mid">${fmt(got)}</div><div class="sub">receberam a 2ª migração</div></div>
+        <div><div class="metric mid">${fmt(only)}</div><div class="sub">só a 1ª (aguardando)</div></div>
+      </div>
+      <div class="stack">
+        <i style="width:${pct}%;background:var(--live)"></i>
+        <i style="width:${rest}%;background:var(--lock)"></i>
+      </div>
+      <div class="row" style="justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--muted)">
+        <span>${fmt(s.uniqueRecipients)} destinatários únicos</span>
+        <span>${fmt(s.totalPayments)} pagamentos</span>
+      </div>
+      ${keys.length?`<div class="sub" style="margin-top:16px;margin-bottom:4px">pagamentos por destinatário</div>
+      <div class="row" style="gap:6px;align-items:flex-end">${distBars}</div>`:''}`;
+  }catch(e){ /* mantém empty state */ }
+}
+
+async function lookup(){
+  const addr=$('addr').value.trim();
+  const err=$('lookErr'), out=$('lookResult');
+  err.classList.remove('show'); out.classList.remove('show');
+  if(!addr){ err.textContent='Cole um endereço primeiro.'; err.classList.add('show'); return; }
+  try{
+    const r=await fetch(`${CONFIG.HORIZON}/accounts/${encodeURIComponent(addr)}`,{headers:{'Accept':'application/json'}});
+    if(r.status===404) throw new Error('Conta não encontrada nesta rede.');
+    if(!r.ok) throw new Error('Erro HTTP '+r.status);
+    const a=await r.json();
+    const native=a.balances.find(b=>b.asset_type==='native')||{};
+    const total=Number(native.balance||0);
+    const locked=Number(native.buying_liabilities||0)+Number(native.selling_liabilities||0);
+    // lockups reais aparecem como claimable balances / liabilities; simplificamos p/ liabilities aqui
+    const rows=[
+      ['saldo total', fmtPi(total)+' Pi', ''],
+      ['sequência', fmt(a.sequence), ''],
+      ['subentradas', fmt(a.subentry_count), ''],
+    ];
+    out.innerHTML=rows.map(([k,v,t])=>`
+      <div class="bal-row"><span class="k">${k}</span><span>${v} ${t}</span></div>`).join('');
+    out.classList.add('show');
+  }catch(e){
+    err.textContent=e.message.includes('Failed to fetch')
+      ? 'Falha na requisição — provavelmente CORS. Use seu Worker como proxy.' : e.message;
+    err.classList.add('show');
+  }
+}
+
+// wire up
+$('lookBtn').addEventListener('click', lookup);
+$('addr').addEventListener('keydown', e=>{ if(e.key==='Enter') lookup(); });
+$('pollLabel').textContent=(CONFIG.POLL_MS/1000);
+
+tick(); loadSupply(); loadMigration();
+setInterval(tick, CONFIG.POLL_MS);
+</script>
+</body>
+</html>

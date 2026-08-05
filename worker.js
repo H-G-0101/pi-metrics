@@ -1,16 +1,15 @@
 /**
  * Pi Mainnet — Worker único (sobe SÓ este arquivo no Cloudflare)
  * ---------------------------------------------------------------
- * Faz tudo:
+ * GERADO por src/build.mjs — não edite à mão; edite src/*.html e rode o build.
+ *
  *   GET  /            -> painel de rede (dashboard)
  *   GET  /inspetor    -> inspetor de carteira
  *   *    /horizon/... -> proxy pro Horizon do Pi (resolve CORS)
  *   GET  /stats       -> devolve a estatística de migração salva
- *   POST /stats       -> o migracao-stats.mjs manda o resultado aqui (precisa do token)
+ *   POST /stats       -> o crawler manda o resultado aqui (precisa do token)
  *
- * Antes de subir, configure no painel do Cloudflare:
- *   - KV Namespace com binding chamado  STATS
- *   - Variável/secret  STATS_TOKEN  (uma senha qualquer; o crawler usa a mesma)
+ * Requer no Cloudflare: KV binding "STATS" e secret "STATS_TOKEN".
  */
 
 const HORIZON = "https://api.mainnet.minepi.com";
@@ -35,7 +34,6 @@ export default {
 
     if (req.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
 
-    // proxy Horizon
     if (p.startsWith("/horizon/")) {
       const target = HORIZON + "/" + p.slice("/horizon/".length) + url.search;
       const r = await fetch(target, { headers: { Accept: "application/json" } });
@@ -43,7 +41,6 @@ export default {
         headers: { "content-type": "application/json" } }));
     }
 
-    // estatística de migração
     if (p === "/stats") {
       if (req.method === "POST") {
         if (req.headers.get("authorization") !== "Bearer " + env.STATS_TOKEN)
@@ -57,6 +54,6 @@ export default {
     }
 
     if (p === "/inspetor") return html(INSP);
-    return html(DASH); // qualquer outra rota -> painel
+    return html(DASH);
   }
 };

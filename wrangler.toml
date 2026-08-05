@@ -1,15 +1,9 @@
-# Deploy por CLI:  wrangler deploy
-# (ou ignore este arquivo e cole o worker.js no painel do Cloudflare)
 name = "pi-metrics"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
 # KV pra guardar a estatística de migração.
-# Crie com:  wrangler kv namespace create STATS
-# e cole o id retornado abaixo:
+# Pegue o id em: Cloudflare > Storage & Databases > KV (id do namespace STATS)
 [[kv_namespaces]]
 binding = "STATS"
-id = "ae3bc135dc1944d1aa17335ebf445853"
-
-# O token é secret — NÃO ponha aqui. Rode:
-#   wrangler secret put STATS_TOKEN
+id = "COLE_O_ID_DO_KV_AQUI"
