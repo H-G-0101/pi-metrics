@@ -9,7 +9,7 @@ compatibility_date = "2025-01-01"
 # e cole o id retornado abaixo:
 [[kv_namespaces]]
 binding = "STATS"
-id = "STATS"
+id = "ae3bc135dc1944d1aa17335ebf445853"
 
 # O token é secret — NÃO ponha aqui. Rode:
 #   wrangler secret put STATS_TOKEN
