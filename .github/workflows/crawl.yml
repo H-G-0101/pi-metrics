@@ -1,0 +1,48 @@
+name: Crawl migração Pi
+
+on:
+  workflow_dispatch:            # botão "Run workflow" na aba Actions
+  schedule:
+    - cron: "0 3 * * *"         # todo dia às 03:00 UTC — ajuste como quiser
+
+# ↓↓↓ EDITE ESTA URL pra do seu Worker ↓↓↓
+env:
+  PUSH_URL: "https://pi-metrics.dogecagepi.workers.dev/stats"
+  PUSH_TOKEN: ${{ secrets.STATS_TOKEN }}
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350         # ~6h, limite do runner gratuito
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # restaura o checkpoint do run anterior (pra retomar de onde parou)
+      - name: Restaura checkpoint
+        uses: actions/cache/restore@v4
+        with:
+          path: checkpoint.json
+          key: pi-ckpt-${{ github.run_id }}
+          restore-keys: pi-ckpt-
+
+      - name: Roda crawler
+        run: node migracao-stats.mjs
+
+      # salva o checkpoint atualizado pro próximo run
+      - name: Salva checkpoint
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: checkpoint.json
+          key: pi-ckpt-${{ github.run_id }}
+
+      - name: Guarda o resultado
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migracao-stats
+          path: migracao-stats.json
