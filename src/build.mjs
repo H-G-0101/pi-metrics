@@ -26,7 +26,7 @@ const worker = `/**
  *   GET  /stats       -> devolve a estatística de migração salva
  *   POST /stats       -> o crawler manda o resultado aqui (precisa do token)
  *
- * Requer no Cloudflare: KV binding "STATS" e secret "STATS_TOKEN".
+ * Requer no Cloudflare: KV "STATS", D1 "DB" e secret "STATS_TOKEN".
  */
 
 const HORIZON = "https://api.mainnet.minepi.com";
@@ -47,6 +47,35 @@ function html(b64){
   } });
 }
 
+function json(data, status = 200){
+  return cors(new Response(JSON.stringify(data), { status, headers: {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  } }));
+}
+
+function authorized(req, env){
+  return req.headers.get("authorization") === "Bearer " + env.STATS_TOKEN;
+}
+
+let schemaReady = false;
+async function ensureD1(env){
+  if (schemaReady) return;
+  if (!env.DB) throw new Error("binding D1 DB ausente");
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS migration_wallets (address TEXT PRIMARY KEY, first_tx TEXT NOT NULL, first_at TEXT NOT NULL, second_tx TEXT, second_at TEXT, event_count INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL, last_tx TEXT)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_wallets_second_at ON migration_wallets(second_at)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS recent_migrations (address TEXT NOT NULL, transaction_hash TEXT NOT NULL, created_at TEXT NOT NULL, amount_pi REAL NOT NULL DEFAULT 0, balance_count INTEGER NOT NULL DEFAULT 1, migration_number INTEGER, PRIMARY KEY(address, transaction_hash))"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS sync_state (name TEXT PRIMARY KEY, cursor TEXT, updated_at TEXT)"),
+  ]);
+  try {
+    await env.DB.prepare("ALTER TABLE migration_wallets ADD COLUMN last_tx TEXT").run();
+  } catch (error) {
+    if (!String(error.message).toLowerCase().includes("duplicate column")) throw error;
+  }
+  schemaReady = true;
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -61,9 +90,63 @@ export default {
         headers: { "content-type": "application/json" } }));
     }
 
+    if (p === "/d1/sync") {
+      if (req.method !== "POST") return json({ error: "metodo nao permitido" }, 405);
+      if (!authorized(req, env)) return json({ error: "nao autorizado" }, 401);
+      try {
+        await ensureD1(env);
+        const body = await req.json();
+        const wallets = Array.isArray(body.wallets) ? body.wallets.slice(0, 40) : [];
+        const now = new Date().toISOString();
+        const statements = wallets.map(row => env.DB.prepare(
+          "INSERT INTO migration_wallets (address,first_tx,first_at,second_tx,second_at,event_count,updated_at,last_tx) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) " +
+          "ON CONFLICT(address) DO UPDATE SET first_tx=excluded.first_tx,first_at=excluded.first_at,second_tx=excluded.second_tx,second_at=excluded.second_at,event_count=excluded.event_count,updated_at=excluded.updated_at,last_tx=excluded.last_tx"
+        ).bind(row.address, row.firstTx, row.firstAt, row.secondTx || null, row.secondAt || null,
+          Number(row.eventCount || 1), now, row.lastTx || row.secondTx || row.firstTx));
+        if (body.meta) {
+          statements.push(env.DB.prepare(
+            "INSERT INTO sync_state (name,cursor,updated_at) VALUES ('crawler',?1,?2) ON CONFLICT(name) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at"
+          ).bind(JSON.stringify(body.meta), now));
+        }
+        if (statements.length) await env.DB.batch(statements);
+        return json({ ok: true, saved: wallets.length });
+      } catch (error) {
+        return json({ error: error.message }, 500);
+      }
+    }
+
+    if (p === "/d1/restore") {
+      if (req.method !== "GET") return json({ error: "metodo nao permitido" }, 405);
+      if (!authorized(req, env)) return json({ error: "nao autorizado" }, 401);
+      try {
+        await ensureD1(env);
+        const after = url.searchParams.get("after") || "";
+        const [walletResult, metaResult] = await env.DB.batch([
+          env.DB.prepare("SELECT address,first_tx,first_at,second_tx,second_at,event_count,last_tx FROM migration_wallets WHERE address > ?1 ORDER BY address LIMIT 501").bind(after),
+          env.DB.prepare("SELECT cursor FROM sync_state WHERE name='crawler' LIMIT 1"),
+        ]);
+        const sourceRows = walletResult.results || [];
+        const hasMore = sourceRows.length > 500;
+        const rows = sourceRows.slice(0, 500).map(row => ({
+          address: row.address,
+          firstTx: row.first_tx,
+          firstAt: row.first_at,
+          secondTx: row.second_tx,
+          secondAt: row.second_at,
+          eventCount: row.event_count,
+          lastTx: row.last_tx,
+        }));
+        let meta = null;
+        try { meta = JSON.parse(metaResult.results?.[0]?.cursor || "null"); } catch (error) {}
+        return json({ wallets: rows, hasMore, meta });
+      } catch (error) {
+        return json({ error: error.message }, 500);
+      }
+    }
+
     if (p === "/stats") {
       if (req.method === "POST") {
-        if (req.headers.get("authorization") !== "Bearer " + env.STATS_TOKEN)
+        if (!authorized(req, env))
           return cors(new Response("nao autorizado", { status: 401 }));
         await env.STATS.put("migracao", await req.text());
         return cors(new Response("ok"));

@@ -192,6 +192,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
     <div class="status-line">
       <span class="chip" id="networkChip"><i class="dot"></i><span id="statusText">conectando</span></span>
       <span class="chip" id="indexChip">carregando índice</span>
+      <span class="chip" id="storageChip">verificando D1</span>
     </div>
   </header>
 
@@ -385,6 +386,7 @@ async function loadMigration(){
     const modern=Number(stats.schemaVersion||0)>=3;
     const weekly=stats.weekly||{};
     const recent=stats.recentScan||{};
+    const storage=stats.storage||{};
 
     $('firstTotal').textContent=fmt(stats.firstMigrationsDetected!=null?stats.firstMigrationsDetected:stats.uniqueRecipients);
     $('secondTotal').textContent=fmt(stats.receivedSecondMigration);
@@ -416,10 +418,13 @@ async function loadMigration(){
     $('syncLabel').className='chip '+(complete?'good':'warn');
     $('syncLabel').textContent=complete?'sincronizado':modern?'processando':'legado';
     $('syncProgress').className='progress '+(complete?'':'working');
+    $('storageChip').className='chip '+(storage.d1Ready?'good':storage.d1SeedInProgress?'warn':'');
+    $('storageChip').textContent=storage.d1Ready?'D1 persistente':storage.d1SeedInProgress?'copiando para D1':'D1 aguardando';
     renderDaily(Array.isArray(stats.daily)?stats.daily:[]);
     renderRanking(Array.isArray(stats.weeklyMigrationRanking)?stats.weeklyMigrationRanking:[]);
   }catch(error){
     $('indexChip').className='chip bad';$('indexChip').textContent='estatísticas indisponíveis';
+    $('storageChip').className='chip bad';$('storageChip').textContent='D1 indisponível';
     $('syncLabel').className='chip bad';$('syncLabel').textContent='erro';
     $('syncMeta').textContent='Não foi possível carregar /stats.';
   }

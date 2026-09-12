@@ -30,6 +30,12 @@ const THROTTLE_MS = Math.max(0, Number(process.env.THROTTLE_MS || 40));
 const MAX_PAGES = Math.max(0, Number(process.env.MAX_PAGES || 0));
 const PUSH_URL = process.env.PUSH_URL || '';
 const PUSH_TOKEN = process.env.PUSH_TOKEN || '';
+const WORKER_BASE = process.env.WORKER_BASE
+  || PUSH_URL.replace(/\/stats(?:\?.*)?$/, '');
+const D1_SYNC_URL = WORKER_BASE ? `${WORKER_BASE}/d1/sync` : '';
+const D1_RESTORE_URL = WORKER_BASE ? `${WORKER_BASE}/d1/restore` : '';
+const D1_SEED_LIMIT = Math.max(100, Number(process.env.D1_SEED_LIMIT || 15000));
+const D1_BATCH_SIZE = 32;
 const CK = process.env.CHECKPOINT_FILE || './checkpoint.json';
 const OUT = process.env.OUTPUT_FILE || './migracao-stats.json';
 const STATE_VERSION = 3;
@@ -50,9 +56,12 @@ function emptyState() {
     recentEvents: {},
     recentScan: null,
     lastSeenAt: null,
+    d1Ready: false,
+    d1SeedAfter: '',
   };
 }
 
+let checkpointLoaded = false;
 function loadState() {
   if (!existsSync(CK)) return emptyState();
   try {
@@ -61,8 +70,11 @@ function loadState() {
       && saved.wallet === WALLET
       && saved.recoveryWallet === RECOVERY_WALLET;
     if (compatible) {
+      checkpointLoaded = true;
       saved.recentEvents ||= {};
       saved.recentScan ||= null;
+      saved.d1Ready ||= false;
+      saved.d1SeedAfter ||= '';
       return saved;
     }
     console.log('Checkpoint antigo ou incompatível; iniciando o índice correto do zero.');
@@ -73,6 +85,133 @@ function loadState() {
 }
 
 let state = loadState();
+let d1Enabled = Boolean(D1_SYNC_URL && D1_RESTORE_URL && PUSH_TOKEN);
+
+function d1Meta(complete = false) {
+  return {
+    cursor: state.cursor,
+    pages: state.pages,
+    scannedRecords: state.scannedRecords,
+    claimableBalances: state.claimableBalances,
+    lastSeenAt: state.lastSeenAt,
+    complete,
+  };
+}
+
+function walletSnapshot(address) {
+  const entry = state.byDest[address];
+  return entry && {
+    address,
+    firstTx: entry.firstTx,
+    firstAt: entry.firstAt,
+    secondTx: entry.secondTx,
+    secondAt: entry.secondAt,
+    lastTx: entry.lastTx,
+    eventCount: entry.eventCount,
+  };
+}
+
+async function callD1(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      authorization: `Bearer ${PUSH_TOKEN}`,
+      'content-type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+  if (!response.ok) throw new Error(`D1 HTTP ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+async function syncD1Wallets(wallets, meta = null) {
+  if (!d1Enabled) return;
+  const rows = wallets.filter(Boolean);
+  if (!rows.length) {
+    if (meta) await callD1(D1_SYNC_URL, { method: 'POST', body: JSON.stringify({ wallets: [], meta }) });
+    return;
+  }
+  for (let index = 0; index < rows.length; index += D1_BATCH_SIZE) {
+    const chunk = rows.slice(index, index + D1_BATCH_SIZE);
+    const isLast = index + D1_BATCH_SIZE >= rows.length;
+    await callD1(D1_SYNC_URL, {
+      method: 'POST',
+      body: JSON.stringify({ wallets: chunk, meta: isLast ? meta : null }),
+    });
+  }
+}
+
+async function restoreFromD1() {
+  if (!d1Enabled || checkpointLoaded) return false;
+  try {
+    let after = '';
+    let restored = 0;
+    let meta = null;
+    do {
+      const url = `${D1_RESTORE_URL}?after=${encodeURIComponent(after)}`;
+      const data = await callD1(url);
+      meta ||= data.meta;
+      if (!meta) return false;
+      for (const row of data.wallets || []) {
+        state.byDest[row.address] = {
+          firstTx: row.firstTx,
+          firstAt: row.firstAt,
+          secondTx: row.secondTx,
+          secondAt: row.secondAt,
+          lastTx: row.lastTx,
+          eventCount: Number(row.eventCount || 1),
+        };
+        after = row.address;
+        restored++;
+      }
+      if (!(data.wallets || []).length || !data.hasMore) break;
+    } while (true);
+
+    state.cursor = meta.cursor || '';
+    state.pages = Number(meta.pages || 0);
+    state.scannedRecords = Number(meta.scannedRecords || 0);
+    state.claimableBalances = Number(meta.claimableBalances || 0);
+    state.lastSeenAt = meta.lastSeenAt || null;
+    state.d1Ready = true;
+    state.d1SeedAfter = '';
+    console.log(`Índice restaurado do D1: ${restored.toLocaleString('pt-BR')} carteiras.`);
+    return true;
+  } catch (error) {
+    console.log(`Aviso: restauração D1 indisponível (${error.message}).`);
+    d1Enabled = false;
+    return false;
+  }
+}
+
+async function seedD1() {
+  if (!d1Enabled || state.d1Ready) return true;
+  const addresses = Object.keys(state.byDest).sort();
+  const candidates = addresses.filter(address => address > state.d1SeedAfter);
+  const selected = candidates.slice(0, D1_SEED_LIMIT);
+  try {
+    for (let index = 0; index < selected.length; index += D1_BATCH_SIZE) {
+      const group = selected.slice(index, index + D1_BATCH_SIZE).map(walletSnapshot);
+      await syncD1Wallets(group);
+      state.d1SeedAfter = selected[Math.min(index + D1_BATCH_SIZE, selected.length) - 1];
+    }
+    if (candidates.length > selected.length) {
+      console.log(
+        `D1 recebeu mais ${selected.length.toLocaleString('pt-BR')} carteiras; `
+        + 'a cópia inicial continuará na próxima execução.',
+      );
+      return false;
+    }
+    state.d1Ready = true;
+    state.d1SeedAfter = '';
+    await syncD1Wallets([], d1Meta(false));
+    console.log('Cópia inicial do índice no D1 concluída ✓');
+    return true;
+  } catch (error) {
+    console.log(`Aviso: sincronização D1 indisponível (${error.message}).`);
+    d1Enabled = false;
+    return true;
+  }
+}
 
 async function getPage(cursor, order = 'asc') {
   const url = `${HORIZON}/accounts/${WALLET}/operations`
@@ -126,7 +265,7 @@ function record(operation) {
   if (operation.created_at) state.lastSeenAt = operation.created_at;
 
   const address = migrationDestination(operation);
-  if (!address || !operation.transaction_hash) return;
+  if (!address || !operation.transaction_hash) return null;
 
   state.claimableBalances++;
   const entry = state.byDest[address] || (state.byDest[address] = {
@@ -137,8 +276,8 @@ function record(operation) {
     lastTx: null,
     eventCount: 0,
   });
-  const number = migrationNumber(entry, operation.transaction_hash, operation.created_at);
-
+  migrationNumber(entry, operation.transaction_hash, operation.created_at);
+  return address;
 }
 
 function addRecentOperation(events, operation) {
@@ -350,7 +489,7 @@ function buildReport({ complete }) {
   const week = weeklyMetrics(now);
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,
@@ -377,6 +516,10 @@ function buildReport({ complete }) {
     },
     weeklyMigrationRanking: week.ranking,
     recentScan: state.recentScan,
+    storage: {
+      d1Ready: state.d1Ready === true,
+      d1SeedInProgress: d1Enabled && state.d1Ready !== true,
+    },
     detection: {
       rule: 'one recipient plus one distinct transaction_hash equals one migration event',
       sourceOperation: 'create_claimable_balance',
@@ -445,9 +588,18 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   console.log(`Carteira de migração: ${WALLET}`);
   console.log('Fonte: operações create_claimable_balance agrupadas por destinatário e transação.\n');
 
+  await restoreFromD1();
   await refreshRecentEvents();
   saveCheckpoint();
   await publishProgress(false);
+
+  const seedFinished = await seedD1();
+  if (!seedFinished) {
+    saveCheckpoint();
+    const stats = await publishProgress(false);
+    printSummary(stats);
+    return;
+  }
 
   let pagesThisRun = 0;
   let complete = false;
@@ -458,10 +610,25 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
       complete = true;
       break;
     }
-    for (const operation of records) record(operation);
+    const changedAddresses = new Set();
+    for (const operation of records) {
+      const address = record(operation);
+      if (address) changedAddresses.add(address);
+    }
     state.cursor = records.at(-1).paging_token;
     state.pages++;
     pagesThisRun++;
+
+    if (d1Enabled && state.d1Ready) {
+      try {
+        await syncD1Wallets([...changedAddresses].map(walletSnapshot), d1Meta(false));
+      } catch (error) {
+        console.log(`Aviso: D1 perdeu a sincronização (${error.message}); será recopiado.`);
+        state.d1Ready = false;
+        state.d1SeedAfter = '';
+        d1Enabled = false;
+      }
+    }
 
     if (state.pages % CHECKPOINT_EVERY === 0) {
       saveCheckpoint();
@@ -480,6 +647,7 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   }
 
   saveCheckpoint();
+  if (d1Enabled && state.d1Ready) await syncD1Wallets([], d1Meta(complete));
   const stats = await publishProgress(complete);
   printSummary(stats);
 })().catch(error => {
