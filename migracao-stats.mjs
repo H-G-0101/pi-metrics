@@ -57,7 +57,7 @@ function emptyState() {
     recentScan: null,
     lastSeenAt: null,
     d1Ready: false,
-    d1SeedAfter: '',
+    d1SeedOffset: 0,
   };
 }
 
@@ -74,7 +74,7 @@ function loadState() {
       saved.recentEvents ||= {};
       saved.recentScan ||= null;
       saved.d1Ready ||= false;
-      saved.d1SeedAfter ||= '';
+      saved.d1SeedOffset = Number(saved.d1SeedOffset || 0);
       return saved;
     }
     console.log('Checkpoint antigo ou incompatível; iniciando o índice correto do zero.');
@@ -173,7 +173,7 @@ async function restoreFromD1() {
     state.claimableBalances = Number(meta.claimableBalances || 0);
     state.lastSeenAt = meta.lastSeenAt || null;
     state.d1Ready = true;
-    state.d1SeedAfter = '';
+    state.d1SeedOffset = 0;
     console.log(`Índice restaurado do D1: ${restored.toLocaleString('pt-BR')} carteiras.`);
     return true;
   } catch (error) {
@@ -185,24 +185,24 @@ async function restoreFromD1() {
 
 async function seedD1() {
   if (!d1Enabled || state.d1Ready) return true;
-  const addresses = Object.keys(state.byDest).sort();
-  const candidates = addresses.filter(address => address > state.d1SeedAfter);
-  const selected = candidates.slice(0, D1_SEED_LIMIT);
+  const addresses = Object.keys(state.byDest);
+  const start = Math.min(state.d1SeedOffset, addresses.length);
+  const selected = addresses.slice(start, start + D1_SEED_LIMIT);
   try {
     for (let index = 0; index < selected.length; index += D1_BATCH_SIZE) {
       const group = selected.slice(index, index + D1_BATCH_SIZE).map(walletSnapshot);
       await syncD1Wallets(group);
-      state.d1SeedAfter = selected[Math.min(index + D1_BATCH_SIZE, selected.length) - 1];
+      state.d1SeedOffset = start + Math.min(index + D1_BATCH_SIZE, selected.length);
     }
-    if (candidates.length > selected.length) {
+    if (state.d1SeedOffset < addresses.length) {
       console.log(
         `D1 recebeu mais ${selected.length.toLocaleString('pt-BR')} carteiras; `
-        + 'a cópia inicial continuará na próxima execução.',
+        + 'a cópia continuará em paralelo na próxima execução.',
       );
       return false;
     }
     state.d1Ready = true;
-    state.d1SeedAfter = '';
+    state.d1SeedOffset = 0;
     await syncD1Wallets([], d1Meta(false));
     console.log('Cópia inicial do índice no D1 concluída ✓');
     return true;
@@ -616,9 +616,8 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   const seedFinished = await seedD1();
   if (!seedFinished) {
     saveCheckpoint();
-    const stats = await publishProgress(false);
-    printSummary(stats);
-    return;
+    await publishProgress(false);
+    console.log('A classificação histórica continuará enquanto o D1 é preenchido.');
   }
 
   let pagesThisRun = 0;
@@ -645,7 +644,7 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
       } catch (error) {
         console.log(`Aviso: D1 perdeu a sincronização (${error.message}); será recopiado.`);
         state.d1Ready = false;
-        state.d1SeedAfter = '';
+        state.d1SeedOffset = 0;
         d1Enabled = false;
       }
     }

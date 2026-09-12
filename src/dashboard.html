@@ -118,7 +118,16 @@ td{padding:11px 10px;border-bottom:1px solid rgba(37,44,64,.7);font-size:12px}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover{background:rgba(255,255,255,.018)}
 .rank{color:var(--purple);font:600 11px var(--mono)}
-.address{font:500 11px var(--mono)}
+.address{font:500 11px var(--mono);white-space:nowrap}
+.address-cell{display:inline-flex;align-items:center;gap:7px}
+.copy-wallet{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--muted);cursor:pointer;transition:.18s}
+.copy-wallet:hover{color:var(--text);border-color:var(--purple);background:rgba(174,100,255,.09)}
+.copy-wallet:focus-visible{outline:2px solid var(--purple);outline-offset:2px}
+.copy-wallet.copied{width:68px;color:var(--green);border-color:rgba(66,211,146,.55);background:rgba(66,211,146,.08)}
+.copy-wallet svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.copy-label{display:none;font:600 9px var(--mono);pointer-events:none}
+.copy-wallet.copied svg{display:none}
+.copy-wallet.copied .copy-label{display:inline}
 .type{display:inline-flex;padding:3px 8px;border-radius:999px;background:var(--panel2);color:var(--muted);font:600 10px var(--mono)}
 .type.second{color:var(--green);background:rgba(66,211,146,.08)}
 .amount{text-align:right;font:600 11px var(--mono);white-space:nowrap}
@@ -367,12 +376,34 @@ function renderRanking(rows){
   body.innerHTML=rows.map(row=>{
     const cls=row.migrationType==='2ª'?'type second':'type';
     return '<tr><td class="rank">#'+row.rank+'</td>'+
-      '<td class="address" title="'+row.address+'">'+shortAddress(row.address)+'</td>'+
+      '<td class="address"><span class="address-cell"><span title="'+row.address+'">'+shortAddress(row.address)+'</span>'+
+      '<button class="copy-wallet" type="button" data-address="'+row.address+'" title="Copiar carteira" aria-label="Copiar carteira '+row.address+'">'+
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg><span class="copy-label">Copiado</span></button></span></td>'+
       '<td><span class="'+cls+'">'+row.migrationType+'</span></td>'+
       '<td>'+fmt(row.balanceCount)+'</td>'+
       '<td class="amount">'+fmtPi(row.amountPi,7)+' Pi</td></tr>';
   }).join('');
 }
+
+async function copyWallet(button){
+  const address=button.dataset.address;
+  try{
+    if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(address);
+    else{
+      const area=document.createElement('textarea');
+      area.value=address;area.setAttribute('readonly','');area.style.position='fixed';area.style.opacity='0';
+      document.body.appendChild(area);area.select();document.execCommand('copy');area.remove();
+    }
+    button.classList.add('copied');button.title='Copiado!';button.setAttribute('aria-label','Carteira copiada');
+    clearTimeout(button._copyTimer);
+    button._copyTimer=setTimeout(()=>{button.classList.remove('copied');button.title='Copiar carteira';button.setAttribute('aria-label','Copiar carteira '+address)},1600);
+  }catch(error){button.title='Não foi possível copiar';}
+}
+
+$('rankingBody').addEventListener('click',event=>{
+  const button=event.target.closest('.copy-wallet');
+  if(button)copyWallet(button);
+});
 
 async function loadMigration(){
   try{
