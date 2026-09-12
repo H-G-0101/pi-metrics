@@ -230,17 +230,59 @@ async function getPage(cursor, order = 'asc') {
   }
 }
 
-function migrationDestination(operation) {
+function migrationRecipient(operation) {
   if (operation.type !== 'create_claimable_balance' || operation.source_account !== WALLET) {
     return null;
   }
   const claimants = operation.claimants || [];
-  const recipient = claimants.find(claimant =>
+  return claimants.find(claimant =>
     claimant.destination
     && claimant.destination !== RECOVERY_WALLET
     && claimant.destination !== WALLET
   );
-  return recipient?.destination || null;
+}
+
+function migrationDestination(operation) {
+  return migrationRecipient(operation)?.destination || null;
+}
+
+function absolutePredicateMs(value) {
+  if (value == null) return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric * 1000;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function unlockTimeFromPredicate(predicate, createdAt) {
+  if (!predicate || typeof predicate !== 'object') return null;
+  const createdMs = Date.parse(createdAt);
+  if (predicate.not?.rel_before != null && Number.isFinite(createdMs)) {
+    return createdMs + Number(predicate.not.rel_before) * 1000;
+  }
+  if (predicate.not?.abs_before != null) return absolutePredicateMs(predicate.not.abs_before);
+  if (Array.isArray(predicate.and)) {
+    const times = predicate.and.map(item => unlockTimeFromPredicate(item, createdAt)).filter(Number.isFinite);
+    return times.length ? Math.max(...times) : null;
+  }
+  if (Array.isArray(predicate.or)) {
+    const times = predicate.or.map(item => unlockTimeFromPredicate(item, createdAt)).filter(Number.isFinite);
+    return times.length ? Math.min(...times) : null;
+  }
+  return null;
+}
+
+function migrationTranche(operation) {
+  const recipient = migrationRecipient(operation);
+  const createdMs = Date.parse(operation.created_at);
+  const unlockMs = unlockTimeFromPredicate(recipient?.predicate, operation.created_at);
+  return {
+    amountPi: +Number(operation.amount || 0).toFixed(7),
+    lockSeconds: Number.isFinite(unlockMs) && Number.isFinite(createdMs)
+      ? Math.max(0, Math.round((unlockMs - createdMs) / 1000))
+      : null,
+    unlockAt: Number.isFinite(unlockMs) ? new Date(unlockMs).toISOString() : null,
+  };
 }
 
 function migrationNumber(entry, tx, at) {
@@ -290,9 +332,11 @@ function addRecentOperation(events, operation) {
     createdAt: operation.created_at,
     amountPi: 0,
     balanceCount: 0,
+    tranches: [],
   });
   event.amountPi += Number(operation.amount || 0);
   event.balanceCount++;
+  event.tranches.push(migrationTranche(operation));
 }
 
 async function refreshRecentEvents() {
@@ -425,6 +469,7 @@ function weeklyMetrics(now = Date.now()) {
       later: false,
       pending: false,
       latestAt: null,
+      tranches: [],
     };
     row.amountPi += event.amountPi;
     row.eventCount++;
@@ -433,6 +478,11 @@ function weeklyMetrics(now = Date.now()) {
     row.second ||= event.migrationNumber === 2;
     row.later ||= event.migrationNumber > 2;
     row.pending ||= event.migrationNumber == null;
+    row.tranches.push(...(event.tranches || []).map(tranche => ({
+      ...tranche,
+      migrationNumber: event.migrationNumber,
+      createdAt: event.createdAt,
+    })));
     if (!row.latestAt || event.createdAt > row.latestAt) row.latestAt = event.createdAt;
     wallets.set(event.address, row);
   }
@@ -456,6 +506,9 @@ function weeklyMetrics(now = Date.now()) {
       eventCount: row.eventCount,
       balanceCount: row.balanceCount,
       latestAt: row.latestAt,
+      tranches: row.tranches.sort((a, b) =>
+        (a.migrationNumber || 99) - (b.migrationNumber || 99)
+        || Number(a.lockSeconds || 0) - Number(b.lockSeconds || 0)),
     }));
 
   return {
@@ -509,7 +562,7 @@ function buildReport({ complete }) {
   const week = weeklyMetrics(now);
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,

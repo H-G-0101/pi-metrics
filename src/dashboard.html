@@ -112,7 +112,7 @@ header{
 .legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
 
 .ranking-wrap{overflow:auto;margin-top:15px}
-table{width:100%;border-collapse:collapse;min-width:570px}
+table{width:100%;border-collapse:collapse;min-width:850px}
 th{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
 td{padding:11px 10px;border-bottom:1px solid rgba(37,44,64,.7);font-size:12px}
 tbody tr:last-child td{border-bottom:0}
@@ -131,6 +131,14 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
 .type{display:inline-flex;padding:3px 8px;border-radius:999px;background:var(--panel2);color:var(--muted);font:600 10px var(--mono)}
 .type.second{color:var(--green);background:rgba(66,211,146,.08)}
 .amount{text-align:right;font:600 11px var(--mono);white-space:nowrap}
+.current-balance{font:600 11px var(--mono);white-space:nowrap;color:var(--blue)}
+.current-balance.loading{color:var(--muted);font-size:9px}
+.tranche-row td{padding:0 10px 12px 52px;background:rgba(9,11,20,.34);border-bottom:1px solid rgba(37,44,64,.7)}
+.tranches{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-top:9px}
+.tranches-label{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.07em;margin-right:2px}
+.tranche{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font:500 9px var(--mono);white-space:nowrap}
+.tranche b{color:var(--text);font-weight:600}.tranche .lock{color:var(--amber)}
+.tranche.unlocked .lock{color:var(--green)}
 .empty{padding:28px 0;color:var(--muted);font-size:12px;text-align:center}
 
 .network-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
@@ -269,7 +277,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
     </div>
     <div class="ranking-wrap">
       <table>
-        <thead><tr><th>posição</th><th>carteira</th><th>tipo</th><th>parcelas</th><th style="text-align:right">valor recebido</th></tr></thead>
+        <thead><tr><th>posição</th><th>carteira</th><th>tipo</th><th>parcelas</th><th>saldo atual</th><th style="text-align:right">valor recebido</th></tr></thead>
         <tbody id="rankingBody"></tbody>
       </table>
       <div class="empty" id="rankingEmpty">aguardando dados semanais…</div>
@@ -309,6 +317,8 @@ const $=id=>document.getElementById(id);
 const fmt=n=>n==null?'—':Number(n).toLocaleString('pt-BR');
 const fmtPi=(n,digits=2)=>n==null?'—':Number(n).toLocaleString('pt-BR',{maximumFractionDigits:digits});
 const shortAddress=a=>a&&a.length>16?a.slice(0,8)+'…'+a.slice(-6):a||'—';
+const balanceCache=new Map();
+const BALANCE_TTL=5*60*1000;
 let lastHeight=null;
 let barVals=Array(42).fill(.15);
 
@@ -375,14 +385,60 @@ function renderRanking(rows){
   empty.style.display='none';
   body.innerHTML=rows.map(row=>{
     const cls=row.migrationType==='2ª'?'type second':'type';
+    const cached=balanceCache.get(row.address);
+    const balance=cached&&Date.now()-cached.at<BALANCE_TTL?fmtPi(cached.value,7)+' Pi':'carregando…';
+    const tranches=(row.tranches||[]).map((tranche,index)=>{
+      const unlocked=tranche.unlockAt&&Date.parse(tranche.unlockAt)<=Date.now();
+      const migration=tranche.migrationNumber?tranche.migrationNumber+'ª':'?';
+      const lock=tranche.lockSeconds==null?'prazo não informado':formatLock(tranche.lockSeconds);
+      const until=tranche.unlockAt?' · até '+new Date(tranche.unlockAt).toLocaleDateString('pt-BR') : '';
+      return '<span class="tranche '+(unlocked?'unlocked':'')+'" title="Parcela '+(index+1)+until+'"><b>'+migration+' · '+fmtPi(tranche.amountPi,7)+' Pi</b><span class="lock">'+(unlocked?'prazo encerrado':'bloqueio: '+lock)+'</span></span>';
+    }).join('');
     return '<tr><td class="rank">#'+row.rank+'</td>'+
       '<td class="address"><span class="address-cell"><span title="'+row.address+'">'+shortAddress(row.address)+'</span>'+
       '<button class="copy-wallet" type="button" data-address="'+row.address+'" title="Copiar carteira" aria-label="Copiar carteira '+row.address+'">'+
       '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg><span class="copy-label">Copiado</span></button></span></td>'+
       '<td><span class="'+cls+'">'+row.migrationType+'</span></td>'+
       '<td>'+fmt(row.balanceCount)+'</td>'+
-      '<td class="amount">'+fmtPi(row.amountPi,7)+' Pi</td></tr>';
+      '<td class="current-balance '+(cached?'':'loading')+'" data-balance="'+row.address+'">'+balance+'</td>'+
+      '<td class="amount">'+fmtPi(row.amountPi,7)+' Pi</td></tr>'+
+      '<tr class="tranche-row"><td colspan="6"><div class="tranches"><span class="tranches-label">tempo de cada parcela</span>'+
+      (tranches||'<span class="tranche"><span class="lock">aguardando nova leitura…</span></span>')+'</div></td></tr>';
   }).join('');
+  loadRankingBalances(rows);
+}
+
+function formatLock(seconds){
+  const days=Math.max(0,Number(seconds||0)/86400);
+  if(days<14)return Math.max(1,Math.round(days))+' dias';
+  if(days<60)return Math.round(days/7)+' semanas';
+  if(days<730)return Math.round(days/30.4375)+' meses';
+  const years=days/365.25;
+  return years.toLocaleString('pt-BR',{maximumFractionDigits:1})+' anos';
+}
+
+async function loadRankingBalances(rows){
+  const addresses=[...new Set(rows.map(row=>row.address))];
+  const stale=addresses.filter(address=>{
+    const cached=balanceCache.get(address);
+    return !cached||Date.now()-cached.at>=BALANCE_TTL;
+  });
+  if(stale.length){
+    try{
+      const response=await fetch('/wallet-balances?addresses='+encodeURIComponent(stale.join(',')),{cache:'no-store'});
+      if(response.ok){
+        const data=await response.json();
+        for(const address of stale)balanceCache.set(address,{value:data.balances?.[address],at:Date.now()});
+      }
+    }catch(error){}
+  }
+  for(const address of addresses){
+    const cached=balanceCache.get(address);
+    document.querySelectorAll('[data-balance="'+address+'"]').forEach(cell=>{
+      cell.textContent=cached&&cached.value!=null?fmtPi(cached.value,7)+' Pi':'indisponível';
+      cell.classList.remove('loading');
+    });
+  }
 }
 
 async function copyWallet(button){

@@ -83,6 +83,24 @@ export default {
 
     if (req.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
 
+    if (p === "/wallet-balances") {
+      const addresses = [...new Set((url.searchParams.get("addresses") || "").split(","))]
+        .filter(address => /^G[A-Z2-7]{55}$/.test(address)).slice(0, 20);
+      if (!addresses.length) return json({ balances: {} });
+      const pairs = await Promise.all(addresses.map(async address => {
+        try {
+          const response = await fetch(HORIZON + "/accounts/" + address, { headers: { Accept: "application/json" } });
+          if (!response.ok) return [address, null];
+          const account = await response.json();
+          const native = (account.balances || []).find(balance => balance.asset_type === "native");
+          return [address, native ? Number(native.balance) : null];
+        } catch (error) {
+          return [address, null];
+        }
+      }));
+      return json({ balances: Object.fromEntries(pairs), generatedAt: new Date().toISOString() });
+    }
+
     if (p.startsWith("/horizon/")) {
       const target = HORIZON + "/" + p.slice("/horizon/".length) + url.search;
       const r = await fetch(target, { headers: { Accept: "application/json" } });
