@@ -1,0 +1,10 @@
+PI Metrics — versão 4 (nova home)
+Data do pacote: 2026-09-12
+
+Inclui:
+- nova home com todas as estatísticas organizadas;
+- rastreamento separado da primeira e da segunda migração;
+- soma das parcelas create_claimable_balance da mesma transação;
+- ranking semanal das 20 carteiras que mais receberam Pi;
+- publicação parcial do progresso durante a indexação;
+- atualização automática do painel a cada 60 segundos.

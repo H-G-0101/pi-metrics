@@ -23,7 +23,8 @@ const RECOVERY_WALLET = process.env.RECOVERY_WALLET
   || 'GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ';
 
 const PAGE_LIMIT = Math.min(200, Math.max(1, Number(process.env.PAGE_LIMIT || 200)));
-const CHECKPOINT_EVERY = Math.max(1, Number(process.env.CHECKPOINT_EVERY || 25));
+const CHECKPOINT_EVERY = Math.max(1, Number(process.env.CHECKPOINT_EVERY || 100));
+const PUSH_EVERY_PAGES = Math.max(1, Number(process.env.PUSH_EVERY_PAGES || 250));
 const THROTTLE_MS = Math.max(0, Number(process.env.THROTTLE_MS || 120));
 const MAX_PAGES = Math.max(0, Number(process.env.MAX_PAGES || 0));
 const PUSH_URL = process.env.PUSH_URL || '';
@@ -319,6 +320,17 @@ async function pushReport(stats) {
   console.log('Resultado enviado ao Worker ✓');
 }
 
+async function publishProgress(complete = false) {
+  const stats = writeReport({ complete });
+  if (!PUSH_URL) return stats;
+  try {
+    await pushReport(stats);
+  } catch (error) {
+    console.log(`Aviso: não foi possível publicar o progresso (${error.message}).`);
+  }
+  return stats;
+}
+
 function printSummary(stats) {
   console.log('\n===== RESULTADO =====');
   console.log(`Carteiras com 1ª migração: ${stats.firstMigrationsDetected.toLocaleString('pt-BR')}`);
@@ -330,16 +342,16 @@ function printSummary(stats) {
 }
 
 let stopping = false;
-function stop(signal) {
+async function stop(signal) {
   if (stopping) return;
   stopping = true;
   console.log(`\n${signal}: salvando checkpoint…`);
   saveCheckpoint();
-  writeReport({ complete: false });
+  await publishProgress(false);
   process.exit(0);
 }
-process.on('SIGINT', () => stop('SIGINT'));
-process.on('SIGTERM', () => stop('SIGTERM'));
+process.on('SIGINT', () => { void stop('SIGINT'); });
+process.on('SIGTERM', () => { void stop('SIGTERM'); });
 
 (async () => {
   console.log(`Carteira de migração: ${WALLET}`);
@@ -368,13 +380,16 @@ process.on('SIGTERM', () => stop('SIGTERM'));
         + `${entries.filter(entry => entry.secondTx).length.toLocaleString('pt-BR')} com 2ª migração`,
       );
     }
+    if (state.pages % PUSH_EVERY_PAGES === 0) {
+      console.log('Publicando progresso parcial…');
+      await publishProgress(false);
+    }
     await sleep(THROTTLE_MS);
   }
 
   saveCheckpoint();
-  const stats = writeReport({ complete });
+  const stats = await publishProgress(complete);
   printSummary(stats);
-  if (complete) await pushReport(stats);
 })().catch(error => {
   console.error('ERRO:', error.message);
   saveCheckpoint();
