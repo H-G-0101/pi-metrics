@@ -249,9 +249,9 @@
 
 <!-- MIGRAÇÃO: lê o JSON do migracao-stats.mjs -->
 <div class="card wide" style="margin-bottom:26px">
-  <div class="eyebrow">2ª migração <span id="migStamp" style="color:var(--pi-dim)"></span></div>
+  <div class="eyebrow">rastreador de migrações <span id="migStamp" style="color:var(--pi-dim)"></span></div>
   <div id="migBody">
-    <p class="empty">Estatística de quem já recebeu a 2ª migração. Rode o
+    <p class="empty">Estatística on-chain de quem recebeu a 2ª migração. Rode o
     <code>migracao-stats.mjs</code> e sirva o <code>migracao-stats.json</code> pelo seu Worker;
     aponte <code>MIGRATION_URL</code> no topo do arquivo.</p>
   </div>
@@ -395,6 +395,47 @@ async function loadMigration(){
   if(!CONFIG.MIGRATION_URL) return;
   try{
     const r=await fetch(CONFIG.MIGRATION_URL); const s=await r.json();
+    if(s && s.schemaVersion===2){
+      const got=Number(s.receivedSecondMigration||0);
+      const first=Number(s.firstMigrationsDetected||0);
+      const day=Number(s.secondMigrationLast24h||0);
+      const week=Number(s.secondMigrationLast7d||0);
+      const daily=Array.isArray(s.daily)?s.daily:[];
+      const maxV=Math.max(1,...daily.map(row=>Number(row.second||0)));
+      const dailyBars=daily.map(row=>
+        "<div style='text-align:center;flex:1'>"+
+          "<div style='height:54px;display:flex;align-items:flex-end;justify-content:center' title='"+fmt(row.second)+" segundas migrações em "+row.date+"'>"+
+            "<div style='width:min(72%,18px);min-height:"+(row.second?2:0)+"px;border-radius:3px 3px 0 0;background:var(--pi);height:"+(Number(row.second||0)/maxV*100)+"%'></div>"+
+          "</div>"+
+          "<div style='font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:5px'>"+row.date.slice(8)+"</div>"+
+        "</div>"
+      ).join('');
+      const latest=s.latestSecondMigrationAt
+        ? new Date(s.latestSecondMigrationAt).toLocaleString('pt-BR')
+        : '—';
+      const marker=s.detection?.secondMarkerAmount||'0.0200000';
+      const partial=s.complete===false
+        ? "<div class='sub' style='margin-top:14px;color:var(--lock)'>◷ índice em construção — o total aumenta à medida que o histórico é processado</div>"
+        : '';
+      if(s.generatedAt) $('migStamp').textContent='· '+new Date(s.generatedAt).toLocaleString('pt-BR');
+
+      $('migBody').innerHTML=
+        "<div class='row' style='gap:34px;align-items:baseline;flex-wrap:wrap'>"+
+          "<div><div class='metric big' style='color:var(--pi)'>"+fmt(got)+"</div><div class='sub'>pessoas com 2ª migração detectada</div></div>"+
+          "<div><div class='metric mid' style='color:var(--live)'>+"+fmt(day)+"</div><div class='sub'>nas últimas 24 horas</div></div>"+
+          "<div><div class='metric mid'>"+fmt(week)+"</div><div class='sub'>nos últimos 7 dias</div></div>"+
+          "<div><div class='metric mid'>"+fmt(first)+"</div><div class='sub'>1ªs migrações detectadas</div></div>"+
+        "</div>"+
+        "<div class='row' style='justify-content:space-between;gap:18px;flex-wrap:wrap;margin-top:18px;font-family:var(--mono);font-size:11.5px;color:var(--muted)'>"+
+          "<span>última 2ª migração: <b style='color:var(--ink)'>"+latest+"</b></span>"+
+          "<span>marcador on-chain: pagamento de <b style='color:var(--pi)'>"+marker+" Pi</b></span>"+
+        "</div>"+
+        (daily.length
+          ? "<div class='sub' style='margin-top:18px;margin-bottom:4px'>2ªs migrações por dia · últimos 14 dias (UTC)</div><div class='row' style='gap:4px;align-items:flex-end'>"+dailyBars+"</div>"
+          : '')+
+        partial;
+      return;
+    }
     const got=s.receivedSecondMigration||0, only=s.onlyFirst||0;
     const pct=s.pctSecond!=null ? s.pctSecond : (s.uniqueRecipients?got/s.uniqueRecipients*100:0);
     const rest=100-pct;

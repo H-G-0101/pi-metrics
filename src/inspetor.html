@@ -55,9 +55,9 @@
 </head>
 <body>
   <h1>Inspetor de carteira Pi</h1>
-  <p class="lead">Puxa uma amostra dos últimos pagamentos e transações e tabula os
-  <b>valores</b> e <b>memos</b> distintos. Se a 2ª migração tiver um valor ou memo próprio,
-  ele aparece no topo das listas — é o que decide o critério do crawl.</p>
+  <p class="lead">Puxa uma amostra das operações recentes da carteira. Nesta carteira,
+  a <b>1ª migração</b> cria uma conta e a <b>2ª migração</b> envia o marcador nativo de
+  <b>0,0200000 Pi</b> para uma conta já existente.</p>
 
   <div class="controls">
     <div>
@@ -143,16 +143,12 @@ async function run(){
         <td>${t.operation_count}</td>
         <td>${new Date(t.created_at).toLocaleDateString('pt-BR')}</td></tr>`).join('');
 
-    // veredito heurístico
+    // Verifica na amostra o marcador on-chain usado pelo crawler.
     const v=$('verdict');
-    const distinctAmts=amtRows.length, distinctMemos=memoRows.filter(r=>r[0]!=='').length;
-    let msg='<b>Leitura da amostra:</b> ';
-    if(distinctAmts<=3 && amtRows.length>=2)
-      msg+=`há ~${distinctAmts} valor(es) dominante(s) — provável que o <b>valor</b> separe as rodadas. Use um filtro por valor no crawl.`;
-    else if(distinctMemos>=1 && memoRows[0] && memoRows[0][0]!=='')
-      msg+=`os memos têm padrão — vale usar <b>memo</b> como critério (crawl via /transactions).`;
-    else
-      msg+=`sem valor nem memo claramente separando as rodadas nesta amostra — fique no <b>MODE='count'</b> (≥2 pagamentos) e confirme pelo histograma do script.`;
+    const markers=sent.filter(p=>Number(p.amount)===0.02).length;
+    const msg='<b>Leitura da amostra:</b> '+markers.toLocaleString('pt-BR')+
+      ' marcadores de 2ª migração encontrados (pagamentos de <b>0,0200000 Pi</b>). '+
+      'O crawler conta cada carteira destinatária apenas uma vez.';
     v.innerHTML=msg; v.classList.add('show');
 
   }catch(e){
