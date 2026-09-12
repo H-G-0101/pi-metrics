@@ -41,7 +41,10 @@ function cors(r){
 }
 function html(b64){
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); // preserva UTF-8 (π, ■)
-  return new Response(bytes, { headers: { "content-type": "text/html; charset=utf-8" } });
+  return new Response(bytes, { headers: {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store, no-cache, must-revalidate, max-age=0",
+  } });
 }
 
 export default {
@@ -67,7 +70,11 @@ export default {
       }
       const v = await env.STATS.get("migracao");
       return cors(new Response(v || "null",
-        { headers: { "content-type": "application/json" } }));
+        { headers: {
+          "content-type": "application/json",
+          "cache-control": "no-store, no-cache, must-revalidate, max-age=0",
+          "cdn-cache-control": "no-store",
+        } }));
     }
 
     if (p === "/inspetor") return html(INSP);

@@ -294,7 +294,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
 </main>
 
 <script>
-const CONFIG={HORIZON:'/horizon',MIGRATION_URL:'/stats',SUPPLY_URL:'',POLL_MS:6000,MIGRATION_POLL_MS:60000};
+const CONFIG={HORIZON:'/horizon',MIGRATION_URL:'/stats',SUPPLY_URL:'',POLL_MS:6000,MIGRATION_POLL_MS:10000};
 const $=id=>document.getElementById(id);
 const fmt=n=>n==null?'—':Number(n).toLocaleString('pt-BR');
 const fmtPi=(n,digits=2)=>n==null?'—':Number(n).toLocaleString('pt-BR',{maximumFractionDigits:digits});
@@ -375,7 +375,10 @@ function renderRanking(rows){
 
 async function loadMigration(){
   try{
-    const response=await fetch(CONFIG.MIGRATION_URL,{cache:'no-store'});
+    const separator=CONFIG.MIGRATION_URL.includes('?')?'&':'?';
+    const response=await fetch(CONFIG.MIGRATION_URL+separator+'_='+Date.now(),{
+      cache:'no-store',headers:{'cache-control':'no-cache'}
+    });
     if(!response.ok)throw new Error('HTTP '+response.status);
     const stats=await response.json();
     if(!stats)throw new Error('sem dados');
