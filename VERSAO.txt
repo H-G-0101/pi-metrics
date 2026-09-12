@@ -1,4 +1,4 @@
-PI Metrics — versão 4 (nova home)
+PI Metrics — versão 6 (carregamento semanal progressivo)
 Data do pacote: 2026-09-12
 
 Inclui:
@@ -8,3 +8,7 @@ Inclui:
 - ranking semanal das 20 carteiras que mais receberam Pi;
 - publicação parcial do progresso durante a indexação;
 - atualização automática do painel a cada 60 segundos.
+- leitura recente separada: ranking, valores, resumo semanal e gráfico de 14 dias
+  são preenchidos antes de terminar o índice histórico.
+- a primeira página recente é publicada imediatamente; as demais aparecem
+  progressivamente, sem esperar a varredura completa dos 15 dias.
