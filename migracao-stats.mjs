@@ -359,14 +359,6 @@ function saveCheckpoint() {
   renameSync(temp, CK);
 }
 
-function countSince(field, sinceMs) {
-  let total = 0;
-  for (const entry of Object.values(state.byDest)) {
-    if (entry[field] && Date.parse(entry[field]) >= sinceMs) total++;
-  }
-  return total;
-}
-
 function classifyRecentEvents() {
   const rows = Object.values(state.recentEvents)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -480,16 +472,44 @@ function weeklyMetrics(now = Date.now()) {
 function buildReport({ complete }) {
   const now = Date.now();
   pruneRecentEvents(now);
-  const entries = Object.values(state.byDest);
-  const receivedSecond = entries.filter(entry => entry.secondTx).length;
-  const latestSecondAt = entries.reduce(
+  const destinationEntries = Object.entries(state.byDest);
+  const entries = destinationEntries.map(([, entry]) => entry);
+  const recent = classifyRecentEvents();
+  const secondAddresses = new Set(
+    destinationEntries.filter(([, entry]) => entry.secondTx).map(([address]) => address),
+  );
+  const second24hAddresses = new Set(
+    destinationEntries
+      .filter(([, entry]) => entry.secondAt && Date.parse(entry.secondAt) >= now - 86400000)
+      .map(([address]) => address),
+  );
+  const second7dAddresses = new Set(
+    destinationEntries
+      .filter(([, entry]) => entry.secondAt && Date.parse(entry.secondAt) >= now - WEEK_MS)
+      .map(([address]) => address),
+  );
+  for (const event of recent) {
+    if (event.migrationNumber !== 2) continue;
+    secondAddresses.add(event.address);
+    const eventTime = Date.parse(event.createdAt);
+    if (eventTime >= now - 86400000) second24hAddresses.add(event.address);
+    if (eventTime >= now - WEEK_MS) second7dAddresses.add(event.address);
+  }
+  const receivedSecond = secondAddresses.size;
+  const historicalLatestSecondAt = entries.reduce(
     (latest, entry) => entry.secondAt && (!latest || entry.secondAt > latest) ? entry.secondAt : latest,
     null,
+  );
+  const latestSecondAt = recent.reduce(
+    (latest, event) => event.migrationNumber === 2 && (!latest || event.createdAt > latest)
+      ? event.createdAt
+      : latest,
+    historicalLatestSecondAt,
   );
   const week = weeklyMetrics(now);
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,
@@ -499,9 +519,9 @@ function buildReport({ complete }) {
     claimableBalancesScanned: state.claimableBalances,
     firstMigrationsDetected: entries.length,
     receivedSecondMigration: receivedSecond,
-    onlyFirst: entries.length - receivedSecond,
-    secondMigrationLast24h: countSince('secondAt', now - 86400000),
-    secondMigrationLast7d: countSince('secondAt', now - WEEK_MS),
+    onlyFirst: Math.max(0, entries.length - receivedSecond),
+    secondMigrationLast24h: second24hAddresses.size,
+    secondMigrationLast7d: second7dAddresses.size,
     latestSecondMigrationAt: latestSecondAt,
     uniqueMigrationRecipients: entries.length,
     daily: dailySeries(14),
