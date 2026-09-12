@@ -55,9 +55,9 @@
 </head>
 <body>
   <h1>Inspetor de carteira Pi</h1>
-  <p class="lead">Puxa uma amostra das operações recentes da carteira e agrupa os
-  <b>create_claimable_balance</b> por destinatário e transação. Um ou dois balances
-  com o mesmo hash representam parcelas de uma única migração.</p>
+  <p class="lead">Puxa uma amostra dos últimos pagamentos e transações e tabula os
+  <b>valores</b> e <b>memos</b> distintos. Se a 2ª migração tiver um valor ou memo próprio,
+  ele aparece no topo das listas — é o que decide o critério do crawl.</p>
 
   <div class="controls">
     <div>
@@ -70,7 +70,7 @@
     </div>
     <div class="go">
       <button id="btn">Amostrar</button>
-      <span class="note" id="note">200 operações + 200 transações</span>
+      <span class="note" id="note">200 pagamentos + 200 transações</span>
     </div>
     <div class="err" id="err"></div>
   </div>
@@ -118,43 +118,41 @@ function tally(items, keyFn, mount, colorTop){
 }
 
 function fmtAmt(a){ return Number(a).toLocaleString('pt-BR',{maximumFractionDigits:7}); }
-function cbDest(op){
-  const recovery='GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ';
-  return (op.claimants||[]).find(c=>c.destination&&c.destination!==recovery&&c.destination!==W())?.destination
-    || '';
-}
 
 async function run(){
   const btn=$('btn'), err=$('err'); err.classList.remove('show');
   btn.disabled=true; btn.textContent='Puxando…';
   try{
     const w=W();
-    const [ops, txs]=await Promise.all([
-      grab(`/accounts/${w}/operations?order=desc&limit=200`),
+    const [pays, txs]=await Promise.all([
+      grab(`/accounts/${w}/payments?order=desc&limit=200`),
       grab(`/accounts/${w}/transactions?order=desc&limit=200`),
     ]);
-    const sent=ops.filter(p=>p.type==='create_claimable_balance'&&p.source_account===w);
+    const sent=pays.filter(p=>p.type==='payment'&&p.from===w&&p.asset_type==='native');
 
     const amtRows=tally(sent, p=>fmtAmt(p.amount), 'amtTally');
     const memoRows=tally(txs, t=>t.memo||'', 'memoTally');
 
     $('payTable').innerHTML=`<tr><th>valor</th><th>para</th><th>quando</th></tr>`+
-      sent.slice(0,60).map(p=>{ const d=cbDest(p); return `<tr><td>${fmtAmt(p.amount)}</td>
-        <td title="${d}">${d.slice(0,6)}…${d.slice(-4)}</td>
-        <td>${new Date(p.created_at).toLocaleDateString('pt-BR')}</td></tr>`; }).join('');
+      sent.slice(0,60).map(p=>`<tr><td>${fmtAmt(p.amount)}</td>
+        <td title="${p.to}">${p.to.slice(0,6)}…${p.to.slice(-4)}</td>
+        <td>${new Date(p.created_at).toLocaleDateString('pt-BR')}</td></tr>`).join('');
 
     $('txTable').innerHTML=`<tr><th>memo</th><th>ops</th><th>quando</th></tr>`+
       txs.slice(0,60).map(t=>`<tr><td title="${t.memo||''}">${t.memo||'—'}</td>
         <td>${t.operation_count}</td>
         <td>${new Date(t.created_at).toLocaleDateString('pt-BR')}</td></tr>`).join('');
 
-    // Cada combinação destinatário + hash é um evento, mesmo com duas parcelas.
+    // veredito heurístico
     const v=$('verdict');
-    const recipients=new Set(sent.map(cbDest).filter(Boolean));
-    const events=new Set(sent.map(p=>cbDest(p)+':'+p.transaction_hash).filter(k=>!k.startsWith(':')));
-    const msg='<b>Leitura da amostra:</b> '+sent.length.toLocaleString('pt-BR')+
-      ' claimable balances, agrupados em <b>'+events.size.toLocaleString('pt-BR')+
-      ' eventos de migração</b> para '+recipients.size.toLocaleString('pt-BR')+' carteiras.';
+    const distinctAmts=amtRows.length, distinctMemos=memoRows.filter(r=>r[0]!=='').length;
+    let msg='<b>Leitura da amostra:</b> ';
+    if(distinctAmts<=3 && amtRows.length>=2)
+      msg+=`há ~${distinctAmts} valor(es) dominante(s) — provável que o <b>valor</b> separe as rodadas. Use um filtro por valor no crawl.`;
+    else if(distinctMemos>=1 && memoRows[0] && memoRows[0][0]!=='')
+      msg+=`os memos têm padrão — vale usar <b>memo</b> como critério (crawl via /transactions).`;
+    else
+      msg+=`sem valor nem memo claramente separando as rodadas nesta amostra — fique no <b>MODE='count'</b> (≥2 pagamentos) e confirme pelo histograma do script.`;
     v.innerHTML=msg; v.classList.add('show');
 
   }catch(e){

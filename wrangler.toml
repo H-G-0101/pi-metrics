@@ -6,4 +6,4 @@ compatibility_date = "2025-01-01"
 # Pegue o id em: Cloudflare > Storage & Databases > KV (id do namespace STATS)
 [[kv_namespaces]]
 binding = "STATS"
-id = "ae3bc135dc1944d1aa17335ebf445853"
+id = "COLE_O_ID_DO_KV_AQUI"
