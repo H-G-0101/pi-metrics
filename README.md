@@ -51,24 +51,41 @@ Abra a URL do Worker: o painel deve carregar e a altura do ledger subir a cada p
    Nome `STATS_TOKEN`, **o mesmo valor** do secret do Worker.
 3. Aba *Actions* → "Crawl migração Pi" → **Run workflow**.
 
-O crawler percorre os pagamentos da carteira e, no fim, empurra o resultado pro Worker.
-O card "2ª migração" do painel se preenche sozinho.
+O crawler percorre as operações da carteira e, quando alcança o topo da blockchain,
+envia o resultado ao Worker. O painel mostra:
+
+- pessoas únicas com 2ª migração detectada;
+- novas 2ªs migrações nas últimas 24 horas e nos últimos 7 dias;
+- histórico diário dos últimos 14 dias;
+- 1ªs migrações detectadas pela mesma carteira.
+- ranking semanal das 20 carteiras que mais receberam Pi, somando 1ª e 2ª migração.
 
 Cada execução do GitHub roda até ~6h. Se a carteira for grande e não terminar, o
 `checkpoint.json` fica no cache e a próxima execução **retoma de onde parou** — é só rodar
-de novo (ou deixar o agendamento diário).
+de novo (ou deixar o agendamento automático, configurado para quatro vezes por dia).
 
-## 3. Achar o critério da 2ª migração
+## 3. Como a 2ª migração é identificada
 
-Antes do crawl longo, abra `/inspetor` no Worker e clique **Amostrar**. O veredito diz se a
-2ª migração se separa por **valor**, **memo** ou se é pra usar o modo padrão (`count`).
+A fonte correta são as operações `create_claimable_balance` criadas pela carteira
+de migração. A chave de deduplicação é:
 
-No `migracao-stats.mjs`, o modo é controlado por `MODE`:
-- `count` — quem recebeu ≥2 pagamentos já pegou a 2ª (padrão, não precisa de marca).
-- `date`  — pagamentos a partir de `ROUND2_FROM` contam como rodada 2.
+```text
+carteira destinatária + transaction_hash = um evento de migração
+```
 
-O `paymentsPerRecipient` no resultado valida o método: se quase todo mundo tem 1 ou 2
-pagamentos, o `count` está certo.
+Uma migração pode criar um ou dois claimable balances no mesmo hash. Eles são parcelas
+da mesma migração (por exemplo, uma parcela com bloqueio curto e outra com bloqueio
+mais longo), portanto são somados, mas contam como somente um evento.
+
+- primeiro hash distinto para o destinatário: **1ª migração**;
+- segundo hash distinto para o mesmo destinatário: **2ª migração**;
+- `claim_claimable_balance`: resgate de uma parcela, não uma nova migração;
+- `create_account`: evidência adicional da primeira migração, não é usado sozinho
+  para calcular a segunda.
+
+O ranking semanal agrega o valor de todos os claimable balances criados para cada
+carteira nos últimos sete dias. Se uma carteira receber primeira e segunda migração
+na mesma janela, os valores aparecem somados e o tipo será `1ª e 2ª`.
 
 ## 4. Editar o visual
 
@@ -77,6 +94,16 @@ regenerar o `worker.js`, e commite. O build embute os HTMLs no Worker em base64.
 
 ## Configuração do crawler
 
-O `migracao-stats.mjs` lê variáveis de ambiente (o workflow já passa as certas), com
-estes padrões: `HORIZON`, `WALLET`, `MODE`, `PUSH_URL`, `PUSH_TOKEN`. Dá pra rodar local
-também: `PUSH_URL=... PUSH_TOKEN=... node migracao-stats.mjs`.
+O `migracao-stats.mjs` lê variáveis de ambiente (o workflow já passa as principais):
+`HORIZON`, `WALLET`, `RECOVERY_WALLET`, `PUSH_URL`, `PUSH_TOKEN`,
+`THROTTLE_MS`, `PAGE_LIMIT` e `MAX_PAGES`.
+
+Para testar só uma página sem enviar dados ao Worker:
+
+```bash
+MAX_PAGES=1 CHECKPOINT_FILE=/tmp/pi-checkpoint.json \
+OUTPUT_FILE=/tmp/pi-stats.json node migracao-stats.mjs
+```
+
+O resultado parcial nunca é enviado ao Worker. O envio acontece somente quando o
+crawler alcança o topo do histórico disponível no Horizon.

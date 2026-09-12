@@ -395,11 +395,14 @@ async function loadMigration(){
   if(!CONFIG.MIGRATION_URL) return;
   try{
     const r=await fetch(CONFIG.MIGRATION_URL); const s=await r.json();
-    if(s && s.schemaVersion===2){
+    if(s && s.schemaVersion>=2){
       const got=Number(s.receivedSecondMigration||0);
       const first=Number(s.firstMigrationsDetected||0);
       const day=Number(s.secondMigrationLast24h||0);
       const week=Number(s.secondMigrationLast7d||0);
+      const weekly=s.weekly||{};
+      const ranking=Array.isArray(s.weeklyMigrationRanking)?s.weeklyMigrationRanking:[];
+      const fmtPi7=n=>Number(n||0).toLocaleString('pt-BR',{maximumFractionDigits:7});
       const daily=Array.isArray(s.daily)?s.daily:[];
       const maxV=Math.max(1,...daily.map(row=>Number(row.second||0)));
       const dailyBars=daily.map(row=>
@@ -413,7 +416,18 @@ async function loadMigration(){
       const latest=s.latestSecondMigrationAt
         ? new Date(s.latestSecondMigrationAt).toLocaleString('pt-BR')
         : '—';
-      const marker=s.detection?.secondMarkerAmount||'0.0200000';
+      const method=s.schemaVersion>=3
+        ? 'claimable balances agrupados por carteira + transação'
+        : 'índice legado';
+      const rankingRows=ranking.map(row=>{
+        const short=row.address.slice(0,7)+'…'+row.address.slice(-5);
+        return "<tr>"+
+          "<td style='padding:9px 8px;color:var(--pi);font-weight:600;border-bottom:1px solid var(--line)'>#"+row.rank+"</td>"+
+          "<td title='"+row.address+"' style='padding:9px 8px;font-family:var(--mono);border-bottom:1px solid var(--line)'>"+short+"</td>"+
+          "<td style='padding:9px 8px;border-bottom:1px solid var(--line)'><span style='color:"+(row.migrationType==='2ª'?'var(--live)':'var(--ink)')+"'>"+row.migrationType+"</span></td>"+
+          "<td style='padding:9px 8px;text-align:right;font-family:var(--mono);font-weight:600;border-bottom:1px solid var(--line)'>"+fmtPi7(row.amountPi)+" Pi</td>"+
+        "</tr>";
+      }).join('');
       const partial=s.complete===false
         ? "<div class='sub' style='margin-top:14px;color:var(--lock)'>◷ índice em construção — o total aumenta à medida que o histórico é processado</div>"
         : '';
@@ -428,10 +442,22 @@ async function loadMigration(){
         "</div>"+
         "<div class='row' style='justify-content:space-between;gap:18px;flex-wrap:wrap;margin-top:18px;font-family:var(--mono);font-size:11.5px;color:var(--muted)'>"+
           "<span>última 2ª migração: <b style='color:var(--ink)'>"+latest+"</b></span>"+
-          "<span>marcador on-chain: pagamento de <b style='color:var(--pi)'>"+marker+" Pi</b></span>"+
+          "<span>método: <b style='color:var(--pi)'>"+method+"</b></span>"+
         "</div>"+
         (daily.length
           ? "<div class='sub' style='margin-top:18px;margin-bottom:4px'>2ªs migrações por dia · últimos 14 dias (UTC)</div><div class='row' style='gap:4px;align-items:flex-end'>"+dailyBars+"</div>"
+          : '')+
+        (ranking.length
+          ? "<div style='margin-top:24px;padding-top:20px;border-top:1px solid var(--line)'>"+
+              "<div class='row' style='justify-content:space-between;gap:16px;align-items:end;flex-wrap:wrap;margin-bottom:12px'>"+
+                "<div><div class='eyebrow'>top 20 semanal</div><div class='sub'>carteiras que mais receberam Pi em 1ª ou 2ª migração</div></div>"+
+                "<div style='text-align:right'><div class='metric mid'>"+fmtPi7(weekly.totalPi)+" Pi</div><div class='sub'>total migrado nos últimos 7 dias</div></div>"+
+              "</div>"+
+              "<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"+
+                "<thead><tr style='text-align:left;color:var(--muted);border-bottom:1px solid var(--line)'><th style='padding:8px'>posição</th><th style='padding:8px'>carteira</th><th style='padding:8px'>migração</th><th style='padding:8px;text-align:right'>valor</th></tr></thead>"+
+                "<tbody>"+rankingRows+"</tbody>"+
+              "</table></div>"+
+            "</div>"
           : '')+
         partial;
       return;

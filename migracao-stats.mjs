@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /**
- * Métricas de 1ª e 2ª migração da Pi Network.
+ * Indexador de migrações da Pi Network.
  *
- * A carteira de distribuição usa duas assinaturas observáveis no endpoint
- * /payments do Horizon:
- *   - 1ª migração: create_account financiado pela carteira;
- *   - 2ª migração: payment nativo de 0,02 Pi para uma conta já existente.
- *
- * O checkpoint guarda somente um registro por destinatário, o que permite
- * continuar o crawl sem duplicar pessoas entre páginas ou execuções.
+ * Regra:
+ * - cada transaction_hash distinto que cria um ou mais claimable balances para
+ *   a mesma carteira representa UM evento de migração;
+ * - o primeiro hash é a 1ª migração e o segundo hash é a 2ª migração;
+ * - dois balances no mesmo hash são parcelas (curta/longa) da mesma migração;
+ * - claim_claimable_balance é resgate e não cria uma nova migração.
  */
 
 import {
@@ -20,30 +19,33 @@ import {
 
 const HORIZON = process.env.HORIZON || 'https://api.mainnet.minepi.com';
 const WALLET = process.env.WALLET || 'GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G';
-const SECOND_MARKER_AMOUNT = process.env.SECOND_MARKER_AMOUNT || '0.0200000';
+const RECOVERY_WALLET = process.env.RECOVERY_WALLET
+  || 'GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ';
 
 const PAGE_LIMIT = Math.min(200, Math.max(1, Number(process.env.PAGE_LIMIT || 200)));
 const CHECKPOINT_EVERY = Math.max(1, Number(process.env.CHECKPOINT_EVERY || 25));
 const THROTTLE_MS = Math.max(0, Number(process.env.THROTTLE_MS || 120));
-const MAX_PAGES = Math.max(0, Number(process.env.MAX_PAGES || 0)); // 0 = sem limite
+const MAX_PAGES = Math.max(0, Number(process.env.MAX_PAGES || 0));
 const PUSH_URL = process.env.PUSH_URL || '';
 const PUSH_TOKEN = process.env.PUSH_TOKEN || '';
-
 const CK = process.env.CHECKPOINT_FILE || './checkpoint.json';
 const OUT = process.env.OUTPUT_FILE || './migracao-stats.json';
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
+const WEEK_MS = 7 * 86400000;
+const RECENT_RETENTION_MS = 15 * 86400000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function emptyState() {
   return {
     version: STATE_VERSION,
     wallet: WALLET,
-    markerAmount: SECOND_MARKER_AMOUNT,
+    recoveryWallet: RECOVERY_WALLET,
     cursor: '',
     pages: 0,
     scannedRecords: 0,
-    firstByDest: {},
-    secondByDest: {},
+    claimableBalances: 0,
+    byDest: {},
+    recentEvents: {},
     lastSeenAt: null,
   };
 }
@@ -54,11 +56,11 @@ function loadState() {
     const saved = JSON.parse(readFileSync(CK, 'utf8'));
     const compatible = saved.version === STATE_VERSION
       && saved.wallet === WALLET
-      && saved.markerAmount === SECOND_MARKER_AMOUNT;
+      && saved.recoveryWallet === RECOVERY_WALLET;
     if (compatible) return saved;
-    console.log('Checkpoint antigo ou de outra configuração; iniciando um crawl completo.');
+    console.log('Checkpoint antigo ou incompatível; iniciando o índice correto do zero.');
   } catch (error) {
-    console.log(`Checkpoint inválido (${error.message}); iniciando um crawl completo.`);
+    console.log(`Checkpoint inválido (${error.message}); iniciando do zero.`);
   }
   return emptyState();
 }
@@ -66,7 +68,7 @@ function loadState() {
 let state = loadState();
 
 async function getPage(cursor) {
-  const url = `${HORIZON}/accounts/${WALLET}/payments`
+  const url = `${HORIZON}/accounts/${WALLET}/operations`
     + `?order=asc&limit=${PAGE_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
 
   for (let attempt = 0; ; attempt++) {
@@ -82,37 +84,87 @@ async function getPage(cursor) {
   }
 }
 
-function isNativeSecondMarker(operation) {
-  return operation.type === 'payment'
-    && operation.from === WALLET
-    && operation.asset_type === 'native'
-    && Number(operation.amount) === Number(SECOND_MARKER_AMOUNT);
+function migrationDestination(operation) {
+  if (operation.type !== 'create_claimable_balance' || operation.source_account !== WALLET) {
+    return null;
+  }
+  const claimants = operation.claimants || [];
+  const recipient = claimants.find(claimant =>
+    claimant.destination
+    && claimant.destination !== RECOVERY_WALLET
+    && claimant.destination !== WALLET
+  );
+  return recipient?.destination || null;
+}
+
+function migrationNumber(entry, tx, at) {
+  if (entry.firstTx === tx) return 1;
+  if (entry.secondTx === tx) return 2;
+  if (entry.lastTx === tx) return entry.eventCount;
+
+  entry.eventCount++;
+  entry.lastTx = tx;
+  if (entry.eventCount === 1) {
+    entry.firstTx = tx;
+    entry.firstAt = at;
+  } else if (entry.eventCount === 2) {
+    entry.secondTx = tx;
+    entry.secondAt = at;
+  }
+  return entry.eventCount;
 }
 
 function record(operation) {
   state.scannedRecords++;
   if (operation.created_at) state.lastSeenAt = operation.created_at;
 
-  if (operation.type === 'create_account' && operation.funder === WALLET && operation.account) {
-    state.firstByDest[operation.account] ||= operation.created_at;
-    return;
-  }
+  const address = migrationDestination(operation);
+  if (!address || !operation.transaction_hash) return;
 
-  if (isNativeSecondMarker(operation) && operation.to) {
-    state.secondByDest[operation.to] ||= operation.created_at;
+  state.claimableBalances++;
+  const entry = state.byDest[address] || (state.byDest[address] = {
+    firstTx: null,
+    firstAt: null,
+    secondTx: null,
+    secondAt: null,
+    lastTx: null,
+    eventCount: 0,
+  });
+  const number = migrationNumber(entry, operation.transaction_hash, operation.created_at);
+
+  if (Date.parse(operation.created_at) >= Date.now() - RECENT_RETENTION_MS) {
+    const key = `${address}:${operation.transaction_hash}`;
+    const event = state.recentEvents[key] || (state.recentEvents[key] = {
+      address,
+      transactionHash: operation.transaction_hash,
+      createdAt: operation.created_at,
+      migrationNumber: number,
+      amountPi: 0,
+      balanceCount: 0,
+    });
+    event.amountPi += Number(operation.amount || 0);
+    event.balanceCount++;
+  }
+}
+
+function pruneRecentEvents(now = Date.now()) {
+  const cutoff = now - RECENT_RETENTION_MS;
+  for (const [key, event] of Object.entries(state.recentEvents)) {
+    if (Date.parse(event.createdAt) < cutoff) delete state.recentEvents[key];
   }
 }
 
 function saveCheckpoint() {
+  pruneRecentEvents();
   const temp = `${CK}.tmp`;
   writeFileSync(temp, JSON.stringify(state));
   renameSync(temp, CK);
 }
 
-function countSince(entries, sinceMs) {
+function countSince(field, sinceMs) {
   let total = 0;
-  for (const iso of Object.values(entries)) {
-    if (Date.parse(iso) >= sinceMs) total++;
+  for (const entry of Object.values(state.byDest)) {
+    if (entry[field] && Date.parse(entry[field]) >= sinceMs) total++;
   }
   return total;
 }
@@ -122,67 +174,128 @@ function dailySeries(days = 14) {
   today.setUTCHours(0, 0, 0, 0);
   const rows = [];
   const byDate = new Map();
-
   for (let offset = days - 1; offset >= 0; offset--) {
     const date = new Date(today.getTime() - offset * 86400000).toISOString().slice(0, 10);
     const row = { date, first: 0, second: 0 };
     rows.push(row);
     byDate.set(date, row);
   }
-
-  for (const iso of Object.values(state.firstByDest)) {
-    const row = byDate.get(iso?.slice(0, 10));
-    if (row) row.first++;
-  }
-  for (const iso of Object.values(state.secondByDest)) {
-    const row = byDate.get(iso?.slice(0, 10));
-    if (row) row.second++;
+  for (const entry of Object.values(state.byDest)) {
+    const first = byDate.get(entry.firstAt?.slice(0, 10));
+    const second = byDate.get(entry.secondAt?.slice(0, 10));
+    if (first) first.first++;
+    if (second) second.second++;
   }
   return rows;
 }
 
-function buildReport({ complete }) {
-  const now = Date.now();
-  const firstAddresses = Object.keys(state.firstByDest);
-  const secondAddresses = Object.keys(state.secondByDest);
-  const allAddresses = new Set([...firstAddresses, ...secondAddresses]);
-  const firstSet = new Set(firstAddresses);
-  const onlyFirst = firstAddresses.reduce((sum, address) => sum + !state.secondByDest[address], 0);
-  const secondAfterFirstInThisWallet = secondAddresses.reduce(
-    (sum, address) => sum + firstSet.has(address),
-    0,
-  );
-  const latestSecondAt = secondAddresses.reduce((latest, address) => {
-    const iso = state.secondByDest[address];
-    return !latest || iso > latest ? iso : latest;
-  }, null);
+function weeklyMetrics(now = Date.now()) {
+  const cutoff = now - WEEK_MS;
+  const wallets = new Map();
+  let totalPi = 0;
+  let firstEvents = 0;
+  let secondEvents = 0;
+
+  for (const event of Object.values(state.recentEvents)) {
+    if (Date.parse(event.createdAt) < cutoff) continue;
+    totalPi += event.amountPi;
+    if (event.migrationNumber === 1) firstEvents++;
+    if (event.migrationNumber === 2) secondEvents++;
+
+    const row = wallets.get(event.address) || {
+      address: event.address,
+      amountPi: 0,
+      eventCount: 0,
+      balanceCount: 0,
+      first: false,
+      second: false,
+      later: false,
+      latestAt: null,
+    };
+    row.amountPi += event.amountPi;
+    row.eventCount++;
+    row.balanceCount += event.balanceCount;
+    row.first ||= event.migrationNumber === 1;
+    row.second ||= event.migrationNumber === 2;
+    row.later ||= event.migrationNumber > 2;
+    if (!row.latestAt || event.createdAt > row.latestAt) row.latestAt = event.createdAt;
+    wallets.set(event.address, row);
+  }
+
+  const ranking = [...wallets.values()]
+    .sort((a, b) => b.amountPi - a.amountPi || a.address.localeCompare(b.address))
+    .slice(0, 20)
+    .map((row, index) => ({
+      rank: index + 1,
+      address: row.address,
+      amountPi: +row.amountPi.toFixed(7),
+      migrationType: row.first && row.second
+        ? '1ª e 2ª'
+        : row.second
+          ? '2ª'
+          : row.later
+            ? 'posterior'
+            : '1ª',
+      eventCount: row.eventCount,
+      balanceCount: row.balanceCount,
+      latestAt: row.latestAt,
+    }));
 
   return {
-    schemaVersion: 2,
+    cutoff: new Date(cutoff).toISOString(),
+    totalPi: +totalPi.toFixed(7),
+    walletCount: wallets.size,
+    firstEvents,
+    secondEvents,
+    ranking,
+  };
+}
+
+function buildReport({ complete }) {
+  const now = Date.now();
+  pruneRecentEvents(now);
+  const entries = Object.values(state.byDest);
+  const receivedSecond = entries.filter(entry => entry.secondTx).length;
+  const latestSecondAt = entries.reduce(
+    (latest, entry) => entry.secondAt && (!latest || entry.secondAt > latest) ? entry.secondAt : latest,
+    null,
+  );
+  const week = weeklyMetrics(now);
+
+  return {
+    schemaVersion: 3,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,
     cursor: state.cursor,
     pagesScanned: state.pages,
     recordsScanned: state.scannedRecords,
-    firstMigrationsDetected: firstAddresses.length,
-    receivedSecondMigration: secondAddresses.length,
-    secondMigrationLast24h: countSince(state.secondByDest, now - 86400000),
-    secondMigrationLast7d: countSince(state.secondByDest, now - 7 * 86400000),
+    claimableBalancesScanned: state.claimableBalances,
+    firstMigrationsDetected: entries.length,
+    receivedSecondMigration: receivedSecond,
+    onlyFirst: entries.length - receivedSecond,
+    secondMigrationLast24h: countSince('secondAt', now - 86400000),
+    secondMigrationLast7d: countSince('secondAt', now - WEEK_MS),
     latestSecondMigrationAt: latestSecondAt,
-    uniqueMigrationRecipients: allAddresses.size,
-    secondAfterFirstInThisWallet,
-    onlyFirst,
+    uniqueMigrationRecipients: entries.length,
     daily: dailySeries(14),
+    weekly: {
+      from: week.cutoff,
+      to: new Date(now).toISOString(),
+      totalPi: week.totalPi,
+      walletCount: week.walletCount,
+      firstMigrationEvents: week.firstEvents,
+      secondMigrationEvents: week.secondEvents,
+    },
+    weeklyMigrationRanking: week.ranking,
     detection: {
-      firstMigration: 'create_account funded by the migration wallet',
-      secondMigration: `native payment of ${SECOND_MARKER_AMOUNT} Pi from the migration wallet`,
-      secondMarkerAmount: SECOND_MARKER_AMOUNT,
+      rule: 'one recipient plus one distinct transaction_hash equals one migration event',
+      sourceOperation: 'create_claimable_balance',
+      recoveryWallet: RECOVERY_WALLET,
       timezone: 'UTC',
     },
-    // Campos mantidos para clientes antigos do painel.
-    uniqueRecipients: allAddresses.size,
-    totalPayments: state.scannedRecords,
+    uniqueRecipients: entries.length,
+    totalPayments: state.claimableBalances,
   };
 }
 
@@ -202,20 +315,18 @@ async function pushReport(stats) {
     },
     body: JSON.stringify(stats),
   });
-  if (!response.ok) {
-    throw new Error(`Worker respondeu HTTP ${response.status}: ${await response.text()}`);
-  }
+  if (!response.ok) throw new Error(`Worker HTTP ${response.status}: ${await response.text()}`);
   console.log('Resultado enviado ao Worker ✓');
 }
 
 function printSummary(stats) {
   console.log('\n===== RESULTADO =====');
-  console.log(`Primeiras migrações:      ${stats.firstMigrationsDetected.toLocaleString('pt-BR')}`);
-  console.log(`Segundas migrações:       ${stats.receivedSecondMigration.toLocaleString('pt-BR')}`);
-  console.log(`Segundas nas últimas 24h: ${stats.secondMigrationLast24h.toLocaleString('pt-BR')}`);
-  console.log(`Segundas nos últimos 7d:  ${stats.secondMigrationLast7d.toLocaleString('pt-BR')}`);
-  console.log(`Registros examinados:     ${stats.recordsScanned.toLocaleString('pt-BR')}`);
-  console.log(stats.complete ? 'Crawl alcançou o topo da blockchain.' : 'Amostra parcial; continue pelo checkpoint.');
+  console.log(`Carteiras com 1ª migração: ${stats.firstMigrationsDetected.toLocaleString('pt-BR')}`);
+  console.log(`Carteiras com 2ª migração: ${stats.receivedSecondMigration.toLocaleString('pt-BR')}`);
+  console.log(`2ªs migrações em 7 dias:   ${stats.secondMigrationLast7d.toLocaleString('pt-BR')}`);
+  console.log(`Pi migrado em 7 dias:      ${stats.weekly.totalPi.toLocaleString('pt-BR', { maximumFractionDigits: 7 })}`);
+  console.log(`Registros examinados:      ${stats.recordsScanned.toLocaleString('pt-BR')}`);
+  console.log(stats.complete ? 'Índice sincronizado com o Horizon.' : 'Índice parcial; continue pelo checkpoint.');
 }
 
 let stopping = false;
@@ -231,8 +342,8 @@ process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
 
 (async () => {
-  console.log(`Carteira: ${WALLET}`);
-  console.log(`Marcador da 2ª migração: pagamento nativo de ${SECOND_MARKER_AMOUNT} Pi\n`);
+  console.log(`Carteira de migração: ${WALLET}`);
+  console.log('Fonte: operações create_claimable_balance agrupadas por destinatário e transação.\n');
 
   let pagesThisRun = 0;
   let complete = false;
@@ -243,7 +354,6 @@ process.on('SIGTERM', () => stop('SIGTERM'));
       complete = true;
       break;
     }
-
     for (const operation of records) record(operation);
     state.cursor = records.at(-1).paging_token;
     state.pages++;
@@ -251,10 +361,11 @@ process.on('SIGTERM', () => stop('SIGTERM'));
 
     if (state.pages % CHECKPOINT_EVERY === 0) {
       saveCheckpoint();
+      const entries = Object.values(state.byDest);
       console.log(
         `Página ${state.pages.toLocaleString('pt-BR')} · `
-        + `${Object.keys(state.firstByDest).length.toLocaleString('pt-BR')} primeiras · `
-        + `${Object.keys(state.secondByDest).length.toLocaleString('pt-BR')} segundas`,
+        + `${entries.length.toLocaleString('pt-BR')} carteiras · `
+        + `${entries.filter(entry => entry.secondTx).length.toLocaleString('pt-BR')} com 2ª migração`,
       );
     }
     await sleep(THROTTLE_MS);
