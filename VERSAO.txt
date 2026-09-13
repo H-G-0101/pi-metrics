@@ -1,4 +1,4 @@
-PI Metrics — version 20 (migration averages status)
+PI Metrics — version 22 (migration distribution metrics)
 Package date: 2026-09-13
 
 Inclui:
@@ -6,6 +6,9 @@ Inclui:
 - rastreamento separado da primeira e da segunda migração;
 - soma das parcelas create_claimable_balance da mesma transação;
 - aviso claro enquanto o Worker ainda contém estatísticas do crawler antigo;
+- binding permanente do D1 `pi-migrations` no wrangler.toml;
+- volume e mediana separados para primeira e segunda migração nos últimos 15 dias;
+- cobertura de classificação com total de eventos classificados e analisados;
 - ranking semanal das 20 carteiras que mais receberam Pi;
 - publicação parcial do progresso durante a indexação;
 - atualização automática do painel a cada 10 segundos.

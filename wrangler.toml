@@ -7,6 +7,9 @@ compatibility_date = "2025-01-01"
 [[kv_namespaces]]
 binding = "STATS"
 id = "ae3bc135dc1944d1aa17335ebf445853"
+
+# Banco persistente do índice de migrações. Manter este binding no arquivo
+# evita que deploys futuros removam o DB configurado no painel da Cloudflare.
 [[d1_databases]]
 binding = "DB"
 database_name = "pi-migrations"

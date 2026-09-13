@@ -251,6 +251,11 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
       <article class="stat primary"><div class="stat-label">Pi distributed · 7 days</div><div class="stat-value" id="weeklyPi">—</div><div class="stat-sub">sum of all lockups</div></article>
       <article class="stat blue"><div class="stat-label">Average 1st migration · 15 days</div><div class="stat-value" id="averageFirst">—</div><div class="stat-sub" id="averageFirstSub">all lockups combined per event</div></article>
       <article class="stat primary"><div class="stat-label">Average 2nd migration · 15 days</div><div class="stat-value" id="averageSecond">—</div><div class="stat-sub" id="averageSecondSub">all lockups combined per event</div></article>
+      <article class="stat blue"><div class="stat-label">1st migration volume · 15 days</div><div class="stat-value" id="volumeFirst">—</div><div class="stat-sub">sum of classified 1st migrations</div></article>
+      <article class="stat primary"><div class="stat-label">2nd migration volume · 15 days</div><div class="stat-value" id="volumeSecond">—</div><div class="stat-sub">sum of classified 2nd migrations</div></article>
+      <article class="stat blue"><div class="stat-label">Median 1st migration · 15 days</div><div class="stat-value" id="medianFirst">—</div><div class="stat-sub">middle classified event value</div></article>
+      <article class="stat primary"><div class="stat-label">Median 2nd migration · 15 days</div><div class="stat-value" id="medianSecond">—</div><div class="stat-sub">middle classified event value</div></article>
+      <article class="stat green"><div class="stat-label">Classification coverage · 15 days</div><div class="stat-value" id="classificationCoverage">—</div><div class="stat-sub" id="classificationCoverageSub">classified recent events</div></article>
       <article class="stat"><div class="stat-label">Wallets receiving Pi · 7 days</div><div class="stat-value" id="weeklyWallets">—</div><div class="stat-sub">1st or 2nd migration</div></article>
       <article class="stat amber"><div class="stat-label">Only 1st migration detected</div><div class="stat-value" id="onlyFirst">—</div><div class="stat-sub">no second hash in the index</div></article>
       <article class="stat"><div class="stat-label">Claimable balances analyzed</div><div class="stat-value" id="claimableCount">—</div><div class="stat-sub">short- and long-term lockups</div></article>
@@ -498,6 +503,8 @@ async function loadMigration(){
     const weekly=stats.weekly||{};
     const averages=stats.migrationAverages||{};
     const averagesReady=Number(stats.schemaVersion||0)>=11;
+    const distributionReady=Number(stats.schemaVersion||0)>=12;
+    const classification=averages.classification||{};
     const recent=stats.recentScan||{};
     const storage=stats.storage||{};
 
@@ -518,6 +525,14 @@ async function loadMigration(){
       : averages.second?.events
         ? 'lockups combined · '+fmt(averages.second.events)+' classified events'
         : 'no classified events in this window';
+    $('volumeFirst').textContent=!distributionReady?'Updating…':fmtPi(averages.first?.totalPi||0,2)+' Pi';
+    $('volumeSecond').textContent=!distributionReady?'Updating…':fmtPi(averages.second?.totalPi||0,2)+' Pi';
+    $('medianFirst').textContent=!distributionReady?'Updating…':averages.first?.medianPi!=null?fmtPi(averages.first.medianPi,2)+' Pi':'—';
+    $('medianSecond').textContent=!distributionReady?'Updating…':averages.second?.medianPi!=null?fmtPi(averages.second.medianPi,2)+' Pi':'—';
+    $('classificationCoverage').textContent=!distributionReady?'Updating…':Number(classification.coveragePercent||0).toFixed(1)+'%';
+    $('classificationCoverageSub').textContent=!distributionReady
+      ? 'waiting for the updated crawler'
+      : fmt(classification.classifiedEvents||0)+' of '+fmt(classification.totalEvents||0)+' events classified';
     $('weeklyWallets').textContent=modern?fmt(weekly.walletCount):'—';
     $('onlyFirst').textContent=fmt(stats.onlyFirst);
     $('claimableCount').textContent=modern?fmt(stats.claimableBalancesScanned):fmt(stats.totalPayments);

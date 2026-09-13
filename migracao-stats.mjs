@@ -590,26 +590,47 @@ function weeklyMetrics(now = Date.now(), events = classifyRecentEvents()) {
 
 function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
   const cutoff = now - RECENT_RETENTION_MS;
-  const first = { events: 0, totalPi: 0 };
-  const second = { events: 0, totalPi: 0 };
+  const first = { events: 0, totalPi: 0, amounts: [] };
+  const second = { events: 0, totalPi: 0, amounts: [] };
+  let totalEvents = 0;
   for (const event of events) {
     if (Date.parse(event.createdAt) < cutoff) continue;
+    totalEvents++;
     const bucket = event.migrationNumber === 1 ? first : event.migrationNumber === 2 ? second : null;
     if (!bucket) continue;
+    const amount = Number(event.amountPi || 0);
     bucket.events++;
-    bucket.totalPi += Number(event.amountPi || 0);
+    bucket.totalPi += amount;
+    bucket.amounts.push(amount);
   }
-  const finish = bucket => ({
-    events: bucket.events,
-    totalPi: +bucket.totalPi.toFixed(7),
-    averagePi: bucket.events ? +(bucket.totalPi / bucket.events).toFixed(7) : null,
-  });
+  const finish = bucket => {
+    const sorted = bucket.amounts.sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    const median = sorted.length
+      ? sorted.length % 2
+        ? sorted[middle]
+        : (sorted[middle - 1] + sorted[middle]) / 2
+      : null;
+    return {
+      events: bucket.events,
+      totalPi: +bucket.totalPi.toFixed(7),
+      averagePi: bucket.events ? +(bucket.totalPi / bucket.events).toFixed(7) : null,
+      medianPi: median == null ? null : +median.toFixed(7),
+    };
+  };
+  const classifiedEvents = first.events + second.events;
   return {
     days: Math.round(RECENT_RETENTION_MS / 86400000),
     from: new Date(cutoff).toISOString(),
     to: new Date(now).toISOString(),
     first: finish(first),
     second: finish(second),
+    classification: {
+      totalEvents,
+      classifiedEvents,
+      pendingEvents: Math.max(0, totalEvents - classifiedEvents),
+      coveragePercent: totalEvents ? +(classifiedEvents / totalEvents * 100).toFixed(2) : 0,
+    },
   };
 }
 
@@ -654,7 +675,7 @@ function buildReport({ complete }) {
   const averages = migrationAverages(now, recent);
 
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,

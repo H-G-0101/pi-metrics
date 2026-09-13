@@ -34,6 +34,10 @@ com o mesmo destinatário e hash; eventos pendentes não entram no cálculo. Enq
 o Worker ainda estiver servindo um relatório anterior ao schema 11, os cards
 informam que estão aguardando a execução do crawler atualizado.
 
+A mesma janela também exibe o volume total e a mediana separados por primeira e
+segunda migração. A cobertura de classificação informa quantos eventos recentes
+já foram associados com segurança a uma dessas duas rodadas.
+
 ## Estrutura
 
 ```
@@ -65,6 +69,10 @@ O `worker.js` já vem pronto — o `src/` só importa se você quiser mexer no v
 ## 1. Deploy do Worker (Cloudflare)
 
 O projeto está conectado ao GitHub, então a config vem do `wrangler.toml`.
+
+O binding D1 `DB` do banco `pi-migrations` também está declarado no
+`wrangler.toml`. Isso impede que uma nova publicação remova o vínculo criado
+no painel da Cloudflare.
 
 1. **Crie o KV**: Cloudflare → *Storage & Databases → KV → Create*. Nome `STATS`.
 2. **Pegue o id** do namespace (a string hexadecimal de ~32 caracteres) e cole no
