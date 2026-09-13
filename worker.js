@@ -41,6 +41,25 @@ function authorized(req, env){
   return req.headers.get("authorization") === "Bearer " + env.STATS_TOKEN;
 }
 
+function preserveLifetimeTotals(next, previous){
+  if (!next || !previous || next.wallet !== previous.wallet) return next;
+  const first = Math.max(
+    Number(next.firstMigrationsDetected || next.uniqueMigrationRecipients || 0),
+    Number(previous.firstMigrationsDetected || previous.uniqueMigrationRecipients || 0),
+  );
+  const second = Math.min(first, Math.max(
+    Number(next.receivedSecondMigration || 0),
+    Number(previous.receivedSecondMigration || 0),
+  ));
+  next.firstMigrationsDetected = first;
+  next.receivedSecondMigration = second;
+  next.onlyFirst = Math.max(0, first - second);
+  next.uniqueMigrationRecipients = Math.max(Number(next.uniqueMigrationRecipients || 0), first);
+  next.uniqueRecipients = Math.max(Number(next.uniqueRecipients || 0), first);
+  next.lifetimeTotalsProtected = true;
+  return next;
+}
+
 let schemaReady = false;
 async function ensureD1(env){
   if (schemaReady) return;
@@ -149,7 +168,14 @@ export default {
       if (req.method === "POST") {
         if (!authorized(req, env))
           return cors(new Response("nao autorizado", { status: 401 }));
-        await env.STATS.put("migracao", await req.text());
+        let incoming;
+        try { incoming = JSON.parse(await req.text()); }
+        catch (error) { return json({ error: "JSON invalido" }, 400); }
+        let previous = null;
+        try { previous = JSON.parse(await env.STATS.get("migracao") || "null"); }
+        catch (error) {}
+        preserveLifetimeTotals(incoming, previous);
+        await env.STATS.put("migracao", JSON.stringify(incoming));
         return cors(new Response("ok"));
       }
       const v = await env.STATS.get("migracao");

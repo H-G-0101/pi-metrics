@@ -1,4 +1,4 @@
-PI Metrics — version 23 (complete migration insights)
+PI Metrics — version 24 (protected lifetime totals)
 Package date: 2026-09-13
 
 Inclui:
@@ -14,6 +14,7 @@ Inclui:
 - participação da segunda migração por eventos e volume de Pi;
 - distribuição das migrações por faixa de valor;
 - maior primeira e segunda migração das últimas 24 horas, com botão de cópia;
+- proteção monotônica dos totais históricos de primeira e segunda migração no KV;
 - ranking semanal das 20 carteiras que mais receberam Pi;
 - publicação parcial do progresso durante a indexação;
 - atualização automática do painel a cada 10 segundos.

@@ -42,6 +42,11 @@ Os insights adicionais usam os mesmos eventos agrupados por destinatário e hash
 distribuição dos lockups por duração, volume diário de Pi, participação da segunda
 migração, faixas de tamanho e maiores eventos classificados das últimas 24 horas.
 
+Os totais históricos de carteiras com primeira e segunda migração são protegidos
+também no KV. Um crawler reiniciado ou com índice parcial não pode substituir esses
+dois totais por valores menores; o D1 permanece como armazenamento detalhado das
+carteiras, hashes e cursor.
+
 ## Estrutura
 
 ```
