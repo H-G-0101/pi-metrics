@@ -399,7 +399,11 @@ function pruneRecentEvents(now = Date.now()) {
 function saveCheckpoint() {
   pruneRecentEvents();
   const temp = `${CK}.tmp`;
-  writeFileSync(temp, JSON.stringify(state));
+  // A janela recente é reconstruída no início de cada execução e não precisa
+  // ser duplicada no checkpoint, que já contém o grande índice histórico.
+  // Mantê-la somente em memória evita ultrapassar o limite de string do Node.
+  const checkpointState = { ...state, recentEvents: {} };
+  writeFileSync(temp, JSON.stringify(checkpointState));
   renameSync(temp, CK);
 }
 
@@ -495,14 +499,14 @@ function weeklyMetrics(now = Date.now()) {
       address: row.address,
       amountPi: +row.amountPi.toFixed(7),
       migrationType: row.first && row.second
-        ? '1ª e 2ª'
+        ? '1st & 2nd'
         : row.second
-          ? '2ª'
+          ? '2nd'
           : row.later
-            ? 'posterior'
+            ? 'later'
             : row.first
-              ? '1ª'
-              : 'em análise',
+              ? '1st'
+              : 'awaiting classification',
       eventCount: row.eventCount,
       balanceCount: row.balanceCount,
       latestAt: row.latestAt,
@@ -562,7 +566,7 @@ function buildReport({ complete }) {
   const week = weeklyMetrics(now);
 
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,

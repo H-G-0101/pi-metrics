@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -204,118 +204,118 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
   <header>
     <div class="brand">
       <div class="logo" id="glyph">π</div>
-      <div><h1>Pi Migration Monitor</h1><p>Dados públicos e verificáveis da Pi Mainnet</p></div>
+      <div><h1>Pi Migration Monitor</h1><p>Public, verifiable Pi Mainnet data</p></div>
     </div>
     <div class="status-line">
-      <span class="chip" id="networkChip"><i class="dot"></i><span id="statusText">conectando</span></span>
-      <span class="chip" id="indexChip">carregando índice</span>
-      <span class="chip" id="storageChip">verificando D1</span>
+      <span class="chip" id="networkChip"><i class="dot"></i><span id="statusText">connecting</span></span>
+      <span class="chip" id="indexChip">loading index</span>
+      <span class="chip" id="storageChip">checking D1</span>
     </div>
   </header>
 
   <section class="hero">
     <div class="hero-main">
-      <div class="kicker">Migrações on-chain</div>
-      <h2>Primeira e segunda migração em um só painel.</h2>
-      <p>Acompanhe quantas carteiras receberam migrações, quanto Pi foi distribuído na semana e quais foram as maiores alocações.</p>
+      <div class="kicker">On-chain migrations</div>
+      <h2>First and second migrations in one dashboard.</h2>
+      <p>Track how many wallets received migrations, how much Pi was distributed over the week, and the largest allocations.</p>
       <div class="hero-meta">
-        <span>carteira: GABT…GC5G</span>
-        <span>fonte: Horizon Mainnet</span>
-        <span>janela semanal móvel: 7 dias</span>
+        <span>migration wallet: GABT…GC5G</span>
+        <span>source: Horizon Mainnet</span>
+        <span>rolling window: 7 days</span>
       </div>
     </div>
     <aside class="sync-card">
-      <div class="sync-top"><span class="sync-title">Situação do índice</span><span class="chip" id="syncLabel">—</span></div>
+      <div class="sync-top"><span class="sync-title">Index status</span><span class="chip" id="syncLabel">—</span></div>
       <div class="big" id="indexedWallets">—</div>
-      <div class="label">carteiras de migração identificadas</div>
+      <div class="label">migration wallets identified</div>
       <div class="progress working" id="syncProgress"><span></span></div>
-      <div class="sync-meta" id="syncMeta">aguardando estatísticas…</div>
+      <div class="sync-meta" id="syncMeta">waiting for statistics…</div>
     </aside>
   </section>
 
   <section class="section">
     <div class="section-head">
-      <div><h2>Resumo das migrações</h2><p>Uma carteira é contada uma vez em cada rodada de migração.</p></div>
+      <div><h2>Migration overview</h2><p>Each wallet is counted once per migration round.</p></div>
       <div class="updated" id="migStamp">—</div>
     </div>
     <div class="stats">
-      <article class="stat blue"><div class="stat-label">Carteiras com 1ª migração</div><div class="stat-value" id="firstTotal">—</div><div class="stat-sub">primeiro hash de migração</div></article>
-      <article class="stat primary"><div class="stat-label">Carteiras com 2ª migração</div><div class="stat-value" id="secondTotal">—</div><div class="stat-sub">segundo hash distinto</div></article>
-      <article class="stat green"><div class="stat-label">Novas 2ªs migrações · 24h</div><div class="stat-value" id="second24h">—</div><div class="stat-sub">últimas 24 horas</div></article>
-      <article class="stat green"><div class="stat-label">Novas 2ªs migrações · 7 dias</div><div class="stat-value" id="second7d">—</div><div class="stat-sub">janela semanal móvel</div></article>
-      <article class="stat primary"><div class="stat-label">Pi migrado · 7 dias</div><div class="stat-value" id="weeklyPi">—</div><div class="stat-sub">soma de todas as parcelas</div></article>
-      <article class="stat"><div class="stat-label">Carteiras migradas · 7 dias</div><div class="stat-value" id="weeklyWallets">—</div><div class="stat-sub">1ª ou 2ª migração</div></article>
-      <article class="stat amber"><div class="stat-label">Somente 1ª identificada</div><div class="stat-value" id="onlyFirst">—</div><div class="stat-sub">sem segundo hash no índice</div></article>
-      <article class="stat"><div class="stat-label">Claimable balances analisados</div><div class="stat-value" id="claimableCount">—</div><div class="stat-sub">parcelas curtas e longas</div></article>
+      <article class="stat blue"><div class="stat-label">Wallets with a 1st migration</div><div class="stat-value" id="firstTotal">—</div><div class="stat-sub">first migration hash</div></article>
+      <article class="stat primary"><div class="stat-label">Wallets with a 2nd migration</div><div class="stat-value" id="secondTotal">—</div><div class="stat-sub">second distinct hash</div></article>
+      <article class="stat green"><div class="stat-label">New 2nd migrations · 24h</div><div class="stat-value" id="second24h">—</div><div class="stat-sub">past 24 hours</div></article>
+      <article class="stat green"><div class="stat-label">New 2nd migrations · 7 days</div><div class="stat-value" id="second7d">—</div><div class="stat-sub">rolling seven-day window</div></article>
+      <article class="stat primary"><div class="stat-label">Pi distributed · 7 days</div><div class="stat-value" id="weeklyPi">—</div><div class="stat-sub">sum of all lockups</div></article>
+      <article class="stat"><div class="stat-label">Wallets receiving Pi · 7 days</div><div class="stat-value" id="weeklyWallets">—</div><div class="stat-sub">1st or 2nd migration</div></article>
+      <article class="stat amber"><div class="stat-label">Only 1st migration detected</div><div class="stat-value" id="onlyFirst">—</div><div class="stat-sub">no second hash in the index</div></article>
+      <article class="stat"><div class="stat-label">Claimable balances analyzed</div><div class="stat-value" id="claimableCount">—</div><div class="stat-sub">short- and long-term lockups</div></article>
     </div>
   </section>
 
   <section class="section two-col">
     <article class="panel">
-      <div class="panel-title">Atividade dos últimos 14 dias</div>
-      <div class="panel-sub">Quantidade diária de migrações identificadas · UTC</div>
-      <div class="chart" id="dailyChart"><div class="empty">aguardando índice…</div></div>
-      <div class="legend"><span><i style="background:var(--blue)"></i>1ª migração</span><span><i style="background:var(--purple)"></i>2ª migração</span><span><i style="background:var(--muted)"></i>classificando</span></div>
+      <div class="panel-title">Activity over the last 14 days</div>
+      <div class="panel-sub">Daily count of identified migrations · UTC</div>
+      <div class="chart" id="dailyChart"><div class="empty">waiting for the index…</div></div>
+      <div class="legend"><span><i style="background:var(--blue)"></i>1st migration</span><span><i style="background:var(--purple)"></i>2nd migration</span><span><i style="background:var(--muted)"></i>awaiting classification</span></div>
     </article>
     <article class="panel">
-      <div class="panel-title">Resumo semanal</div>
-      <div class="panel-sub" id="weeklyRange">Últimos sete dias</div>
+      <div class="panel-title">Weekly overview</div>
+      <div class="panel-sub" id="weeklyRange">Last seven days</div>
       <div class="weekly-summary">
-        <div class="mini"><b id="weeklyFirst">—</b><span>eventos de 1ª migração</span></div>
-        <div class="mini"><b id="weeklySecond">—</b><span>eventos de 2ª migração</span></div>
-        <div class="mini"><b id="weeklyPending">—</b><span>eventos ainda classificando</span></div>
-        <div class="mini"><b id="latestSecond">—</b><span>última 2ª migração</span></div>
+        <div class="mini"><b id="weeklyFirst">—</b><span>1st migration events</span></div>
+        <div class="mini"><b id="weeklySecond">—</b><span>2nd migration events</span></div>
+        <div class="mini"><b id="weeklyPending">—</b><span>awaiting classification</span></div>
+        <div class="mini"><b id="latestSecond">—</b><span>latest 2nd migration</span></div>
       </div>
-      <div class="method"><b>Como é calculado:</b> claimable balances do mesmo destinatário e do mesmo hash são somados como uma migração. Um segundo hash distinto identifica a segunda migração.</div>
+      <div class="method"><b>How it is calculated:</b> claimable balances with the same recipient and transaction hash are combined into one migration event. A second distinct hash identifies the second migration.</div>
     </article>
   </section>
 
   <section class="section panel">
     <div class="section-head">
-      <div><h2>Top 20 semanal</h2><p>Carteiras que mais receberam Pi em primeira ou segunda migração.</p></div>
+      <div><h2>Largest migrations in the last 7 days</h2><p>The 20 wallets that received the most Pi through a first or second migration.</p></div>
       <div class="updated" id="rankingMeta">—</div>
     </div>
     <div class="ranking-wrap">
       <table>
-        <thead><tr><th>posição</th><th>carteira</th><th>tipo</th><th>parcelas</th><th>saldo atual</th><th style="text-align:right">valor recebido</th></tr></thead>
+        <thead><tr><th>rank</th><th>wallet</th><th>migration</th><th>lockups</th><th>available balance</th><th style="text-align:right">Pi received</th></tr></thead>
         <tbody id="rankingBody"></tbody>
       </table>
-      <div class="empty" id="rankingEmpty">aguardando dados semanais…</div>
+      <div class="empty" id="rankingEmpty">waiting for weekly data…</div>
     </div>
   </section>
 
   <section class="section">
-    <div class="section-head"><div><h2>Rede Pi Mainnet</h2><p>Indicadores ao vivo do último ledger.</p></div><div class="updated">atualiza a cada 6 segundos</div></div>
+    <div class="section-head"><div><h2>Pi Mainnet network</h2><p>Live indicators from the latest ledger.</p></div><div class="updated">updates every 6 seconds</div></div>
     <div class="network-grid">
-      <article class="network-card"><div class="l">Altura do ledger</div><div class="n" id="height">—</div><div class="s" id="heightSub">último bloco</div></article>
-      <article class="network-card"><div class="l">Último fechamento</div><div class="n" id="age">—</div><div class="s">tempo desde o bloco</div></article>
-      <article class="network-card"><div class="l">Transações</div><div class="n" id="tx">—</div><div class="s" id="ops">— operações</div></article>
+      <article class="network-card"><div class="l">Ledger height</div><div class="n" id="height">—</div><div class="s" id="heightSub">latest ledger</div></article>
+      <article class="network-card"><div class="l">Latest close</div><div class="n" id="age">—</div><div class="s">time since ledger</div></article>
+      <article class="network-card"><div class="l">Transactions</div><div class="n" id="tx">—</div><div class="s" id="ops">— operations</div></article>
       <article class="network-card"><div class="l">Throughput</div><div class="n" id="tps">—</div><div class="s">tx/s · 10 ledgers</div></article>
-      <article class="network-card"><div class="l">Taxa base</div><div class="n" id="fee">—</div><div class="s">stroops/operação</div></article>
-      <article class="network-card"><div class="l">Protocolo</div><div class="n" id="proto">—</div><div class="s">versão do core</div></article>
+      <article class="network-card"><div class="l">Base fee</div><div class="n" id="fee">—</div><div class="s">stroops/operation</div></article>
+      <article class="network-card"><div class="l">Protocol</div><div class="n" id="proto">—</div><div class="s">core version</div></article>
     </div>
     <div class="pulse" id="bars"></div>
   </section>
 
   <section class="panel supply" id="supplySection" hidden>
-    <div class="panel-title">Supply migrado</div><div id="supplyBody"></div>
+    <div class="panel-title">Migrated supply</div><div id="supplyBody"></div>
   </section>
 
   <section class="lookup">
-    <h2>Consultar uma carteira</h2>
-    <p>Cole um endereço público da Mainnet para verificar saldo e informações da conta.</p>
-    <div class="input-row"><input id="addr" placeholder="GABC...XYZ" autocomplete="off" spellcheck="false"><button id="lookBtn">Consultar</button></div>
+    <h2>Look up a wallet</h2>
+    <p>Paste a public Mainnet address to check its balance and account information.</p>
+    <div class="input-row"><input id="addr" placeholder="GABC...XYZ" autocomplete="off" spellcheck="false"><button id="lookBtn">Look up</button></div>
     <div class="error" id="lookErr"></div><div class="result" id="lookResult"></div>
   </section>
 
-  <footer><span>Pi Migration Monitor</span><span id="footerEndpoint">Horizon Pi Mainnet</span><span>dados públicos on-chain</span></footer>
+  <footer><span>Pi Migration Monitor</span><span id="footerEndpoint">Horizon Pi Mainnet</span><span>public on-chain data</span></footer>
 </main>
 
 <script>
 const CONFIG={HORIZON:'/horizon',MIGRATION_URL:'/stats',SUPPLY_URL:'',POLL_MS:6000,MIGRATION_POLL_MS:10000};
 const $=id=>document.getElementById(id);
-const fmt=n=>n==null?'—':Number(n).toLocaleString('pt-BR');
-const fmtPi=(n,digits=2)=>n==null?'—':Number(n).toLocaleString('pt-BR',{maximumFractionDigits:digits});
+const fmt=n=>n==null?'—':Number(n).toLocaleString('en-US');
+const fmtPi=(n,digits=2)=>n==null?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:digits});
 const shortAddress=a=>a&&a.length>16?a.slice(0,8)+'…'+a.slice(-6):a||'—';
 const balanceCache=new Map();
 const BALANCE_TTL=5*60*1000;
@@ -326,7 +326,7 @@ let barVals=Array(42).fill(.15);
 
 function networkStatus(ok){
   const chip=$('networkChip');chip.className='chip '+(ok?'good':'bad');
-  $('statusText').textContent=ok?'rede online':'sem conexão';
+  $('statusText').textContent=ok?'network online':'offline';
 }
 function pushBar(value){
   barVals.push(Math.max(.08,Math.min(1,value)));barVals.shift();
@@ -351,10 +351,10 @@ async function tick(){
     const height=Number(current.sequence);
     if(height!==lastHeight){pushBar(Number(current.successful_transaction_count||0)/8+.12);lastHeight=height}
     $('height').textContent=fmt(height);
-    $('heightSub').textContent='fechado às '+new Date(current.closed_at).toLocaleTimeString('pt-BR');
+    $('heightSub').textContent='closed at '+new Date(current.closed_at).toLocaleTimeString('en-US');
     $('age').textContent=ago(current.closed_at);
     $('tx').textContent=fmt(current.successful_transaction_count);
-    $('ops').textContent=fmt(current.operation_count)+' operações';
+    $('ops').textContent=fmt(current.operation_count)+' operations';
     $('tps').textContent=(totalTx/seconds).toFixed(2);
     $('fee').textContent=fmt(current.base_fee_in_stroops);
     $('proto').textContent='v'+current.protocol_version;
@@ -364,13 +364,13 @@ async function tick(){
 
 function renderDaily(rows){
   const chart=$('dailyChart');
-  if(!rows.length){chart.innerHTML='<div class="empty">histórico diário ainda não disponível</div>';return}
+  if(!rows.length){chart.innerHTML='<div class="empty">daily history is not available yet</div>';return}
   const max=Math.max(1,...rows.map(r=>Number(r.first||0)+Number(r.second||0)+Number(r.pending||0)));
   chart.innerHTML=rows.map(row=>{
     const first=Math.max(row.first?2:0,Number(row.first||0)/max*100);
     const second=Math.max(row.second?2:0,Number(row.second||0)/max*100);
     const pending=Math.max(row.pending?2:0,Number(row.pending||0)/max*100);
-    const title=fmt(row.first)+' primeiras, '+fmt(row.second)+' segundas e '+fmt(row.pending)+' classificando em '+row.date;
+    const title=fmt(row.first)+' first, '+fmt(row.second)+' second and '+fmt(row.pending)+' awaiting classification on '+row.date;
     return '<div class="day" title="'+title+'"><div class="bar-pair">'+
       '<i class="bar first" style="height:'+first+'%"></i>'+
       '<i class="bar second" style="height:'+second+'%"></i>'+
@@ -384,37 +384,53 @@ function renderRanking(rows){
   if(!rows.length){body.innerHTML='';empty.style.display='block';return}
   empty.style.display='none';
   body.innerHTML=rows.map(row=>{
-    const cls=row.migrationType==='2ª'?'type second':'type';
+    const migrationType=englishMigrationType(row.migrationType);
+    const cls=migrationType==='2nd'?'type second':'type';
     const cached=balanceCache.get(row.address);
-    const balance=cached&&Date.now()-cached.at<BALANCE_TTL?fmtPi(cached.value,7)+' Pi':'carregando…';
+    const balance=cached&&Date.now()-cached.at<BALANCE_TTL?fmtPi(cached.value,7)+' Pi':'loading…';
     const tranches=(row.tranches||[]).map((tranche,index)=>{
       const unlocked=tranche.unlockAt&&Date.parse(tranche.unlockAt)<=Date.now();
-      const migration=tranche.migrationNumber?tranche.migrationNumber+'ª':'?';
-      const lock=tranche.lockSeconds==null?'prazo não informado':formatLock(tranche.lockSeconds);
-      const until=tranche.unlockAt?' · até '+new Date(tranche.unlockAt).toLocaleDateString('pt-BR') : '';
-      return '<span class="tranche '+(unlocked?'unlocked':'')+'" title="Parcela '+(index+1)+until+'"><b>'+migration+' · '+fmtPi(tranche.amountPi,7)+' Pi</b><span class="lock">'+(unlocked?'prazo encerrado':'bloqueio: '+lock)+'</span></span>';
+      const migration=ordinal(tranche.migrationNumber);
+      const lock=tranche.lockSeconds==null?'lock period unavailable':formatLock(tranche.lockSeconds);
+      const until=tranche.unlockAt?' · unlock date '+new Date(tranche.unlockAt).toLocaleDateString('en-US') : '';
+      return '<span class="tranche '+(unlocked?'unlocked':'')+'" title="Lockup '+(index+1)+until+'"><b>'+migration+' migration · '+fmtPi(tranche.amountPi,7)+' Pi</b><span class="lock">'+(unlocked?'lock period ended':'locked for '+lock)+'</span></span>';
     }).join('');
     return '<tr><td class="rank">#'+row.rank+'</td>'+
       '<td class="address"><span class="address-cell"><span title="'+row.address+'">'+shortAddress(row.address)+'</span>'+
-      '<button class="copy-wallet" type="button" data-address="'+row.address+'" title="Copiar carteira" aria-label="Copiar carteira '+row.address+'">'+
-      '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg><span class="copy-label">Copiado</span></button></span></td>'+
-      '<td><span class="'+cls+'">'+row.migrationType+'</span></td>'+
+      '<button class="copy-wallet" type="button" data-address="'+row.address+'" title="Copy wallet" aria-label="Copy wallet '+row.address+'">'+
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg><span class="copy-label">Copied</span></button></span></td>'+
+      '<td><span class="'+cls+'">'+migrationType+'</span></td>'+
       '<td>'+fmt(row.balanceCount)+'</td>'+
       '<td class="current-balance '+(cached?'':'loading')+'" data-balance="'+row.address+'">'+balance+'</td>'+
       '<td class="amount">'+fmtPi(row.amountPi,7)+' Pi</td></tr>'+
-      '<tr class="tranche-row"><td colspan="6"><div class="tranches"><span class="tranches-label">tempo de cada parcela</span>'+
-      (tranches||'<span class="tranche"><span class="lock">aguardando nova leitura…</span></span>')+'</div></td></tr>';
+      '<tr class="tranche-row"><td colspan="6"><div class="tranches"><span class="tranches-label">lockup schedule</span>'+
+      (tranches||'<span class="tranche"><span class="lock">waiting for the next scan…</span></span>')+'</div></td></tr>';
   }).join('');
   loadRankingBalances(rows);
 }
 
+function englishMigrationType(value){
+  return ({'1ª':'1st','2ª':'2nd','1ª e 2ª':'1st & 2nd','posterior':'later','em análise':'awaiting classification'})[value]||value||'awaiting classification';
+}
+
+function ordinal(value){
+  const number=Number(value);
+  if(!number)return '?';
+  const mod100=number%100;
+  const suffix=mod100>=11&&mod100<=13?'th':({1:'st',2:'nd',3:'rd'}[number%10]||'th');
+  return number+suffix;
+}
+
+function unit(value,singular,plural){return value+' '+(value===1?singular:plural)}
+
 function formatLock(seconds){
   const days=Math.max(0,Number(seconds||0)/86400);
-  if(days<14)return Math.max(1,Math.round(days))+' dias';
-  if(days<60)return Math.round(days/7)+' semanas';
-  if(days<730)return Math.round(days/30.4375)+' meses';
+  if(days<14)return unit(Math.max(1,Math.round(days)),'day','days');
+  if(days<60)return unit(Math.round(days/7),'week','weeks');
+  if(days<730)return unit(Math.round(days/30.4375),'month','months');
   const years=days/365.25;
-  return years.toLocaleString('pt-BR',{maximumFractionDigits:1})+' anos';
+  const value=Number(years.toFixed(1));
+  return unit(value,'year','years');
 }
 
 async function loadRankingBalances(rows){
@@ -435,7 +451,7 @@ async function loadRankingBalances(rows){
   for(const address of addresses){
     const cached=balanceCache.get(address);
     document.querySelectorAll('[data-balance="'+address+'"]').forEach(cell=>{
-      cell.textContent=cached&&cached.value!=null?fmtPi(cached.value,7)+' Pi':'indisponível';
+      cell.textContent=cached&&cached.value!=null?fmtPi(cached.value,7)+' Pi':'unavailable';
       cell.classList.remove('loading');
     });
   }
@@ -450,10 +466,10 @@ async function copyWallet(button){
       area.value=address;area.setAttribute('readonly','');area.style.position='fixed';area.style.opacity='0';
       document.body.appendChild(area);area.select();document.execCommand('copy');area.remove();
     }
-    button.classList.add('copied');button.title='Copiado!';button.setAttribute('aria-label','Carteira copiada');
+    button.classList.add('copied');button.title='Copied!';button.setAttribute('aria-label','Wallet copied');
     clearTimeout(button._copyTimer);
-    button._copyTimer=setTimeout(()=>{button.classList.remove('copied');button.title='Copiar carteira';button.setAttribute('aria-label','Copiar carteira '+address)},1600);
-  }catch(error){button.title='Não foi possível copiar';}
+    button._copyTimer=setTimeout(()=>{button.classList.remove('copied');button.title='Copy wallet';button.setAttribute('aria-label','Copy wallet '+address)},1600);
+  }catch(error){button.title='Unable to copy';}
 }
 
 $('rankingBody').addEventListener('click',event=>{
@@ -469,7 +485,7 @@ async function loadMigration(){
     });
     if(!response.ok)throw new Error('HTTP '+response.status);
     const stats=await response.json();
-    if(!stats)throw new Error('sem dados');
+    if(!stats)throw new Error('no data');
     const modern=Number(stats.schemaVersion||0)>=3;
     const weekly=stats.weekly||{};
     const recent=stats.recentScan||{};
@@ -484,36 +500,36 @@ async function loadMigration(){
     $('onlyFirst').textContent=fmt(stats.onlyFirst);
     $('claimableCount').textContent=modern?fmt(stats.claimableBalancesScanned):fmt(stats.totalPayments);
     $('indexedWallets').textContent=fmt(stats.uniqueMigrationRecipients!=null?stats.uniqueMigrationRecipients:stats.uniqueRecipients);
-    $('migStamp').textContent=stats.generatedAt?'atualizado em '+new Date(stats.generatedAt).toLocaleString('pt-BR'):'sem horário';
+    $('migStamp').textContent=stats.generatedAt?'updated '+new Date(stats.generatedAt).toLocaleString('en-US'):'time unavailable';
     $('weeklyFirst').textContent=modern?fmt(weekly.firstMigrationEvents):'—';
     $('weeklySecond').textContent=modern?fmt(weekly.secondMigrationEvents):'—';
     $('weeklyPending').textContent=modern?fmt(weekly.pendingClassificationEvents):'—';
-    $('latestSecond').textContent=stats.latestSecondMigrationAt?new Date(stats.latestSecondMigrationAt).toLocaleDateString('pt-BR'):'—';
+    $('latestSecond').textContent=stats.latestSecondMigrationAt?new Date(stats.latestSecondMigrationAt).toLocaleDateString('en-US'):'—';
     $('weeklyRange').textContent=weekly.from
-      ? 'De '+new Date(weekly.from).toLocaleDateString('pt-BR')+' até agora'+(recent.complete===false?' · dados parciais':'')
-      : 'Últimos sete dias';
+      ? 'From '+new Date(weekly.from).toLocaleDateString('en-US')+' to now'+(recent.complete===false?' · partial data':'')
+      : 'Last seven days';
     $('rankingMeta').textContent=modern
-      ? fmt(weekly.walletCount)+' carteiras'+(recent.complete===false?' · carregando mais…':' na janela completa')
-      : 'dados semanais indisponíveis';
+      ? fmt(weekly.walletCount)+' wallets'+(recent.complete===false?' · loading more…':' in the full window')
+      : 'weekly data unavailable';
     $('syncMeta').textContent=modern
-      ? fmt(stats.pagesScanned)+' páginas · '+fmt(stats.recordsScanned)+' operações examinadas'
-      : 'O /stats ainda contém o formato antigo. Execute o novo crawler.';
+      ? fmt(stats.pagesScanned)+' pages · '+fmt(stats.recordsScanned)+' operations examined'
+      : '/stats still contains the old format. Run the new crawler.';
 
     const complete=stats.complete===true;
     $('indexChip').className='chip '+(complete?'good':'warn');
-    $('indexChip').textContent=modern?(complete?'índice completo':'índice em construção'):'dados antigos';
+    $('indexChip').textContent=modern?(complete?'index complete':'index building'):'old data';
     $('syncLabel').className='chip '+(complete?'good':'warn');
-    $('syncLabel').textContent=complete?'sincronizado':modern?'processando':'legado';
+    $('syncLabel').textContent=complete?'synced':modern?'processing':'legacy';
     $('syncProgress').className='progress '+(complete?'':'working');
     $('storageChip').className='chip '+(storage.d1Ready?'good':storage.d1SeedInProgress?'warn':'');
-    $('storageChip').textContent=storage.d1Ready?'D1 persistente':storage.d1SeedInProgress?'copiando para D1':'D1 aguardando';
+    $('storageChip').textContent=storage.d1Ready?'D1 persistent':storage.d1SeedInProgress?'copying to D1':'D1 waiting';
     renderDaily(Array.isArray(stats.daily)?stats.daily:[]);
     renderRanking(Array.isArray(stats.weeklyMigrationRanking)?stats.weeklyMigrationRanking:[]);
   }catch(error){
-    $('indexChip').className='chip bad';$('indexChip').textContent='estatísticas indisponíveis';
-    $('storageChip').className='chip bad';$('storageChip').textContent='D1 indisponível';
-    $('syncLabel').className='chip bad';$('syncLabel').textContent='erro';
-    $('syncMeta').textContent='Não foi possível carregar /stats.';
+    $('indexChip').className='chip bad';$('indexChip').textContent='statistics unavailable';
+    $('storageChip').className='chip bad';$('storageChip').textContent='D1 unavailable';
+    $('syncLabel').className='chip bad';$('syncLabel').textContent='error';
+    $('syncMeta').textContent='Unable to load /stats.';
   }
 }
 
@@ -526,23 +542,23 @@ async function loadSupply(){
     $('supplySection').hidden=false;
     $('supplyBody').innerHTML='<div class="stat-value">'+fmtPi(total,0)+' Pi</div>'+
       '<div class="stack"><i style="width:'+locked+'%;background:var(--amber)"></i><i style="width:'+(100-locked)+'%;background:var(--green)"></i></div>'+
-      '<div class="legend"><span>'+fmtPi(stats.locked,0)+' Pi travado</span><span>'+fmtPi(stats.unlocked,0)+' Pi livre</span></div>';
+      '<div class="legend"><span>'+fmtPi(stats.locked,0)+' Pi locked</span><span>'+fmtPi(stats.unlocked,0)+' Pi available</span></div>';
   }catch(error){}
 }
 
 async function lookup(){
   const address=$('addr').value.trim(),err=$('lookErr'),out=$('lookResult');
   err.classList.remove('show');out.classList.remove('show');
-  if(!address){err.textContent='Cole um endereço primeiro.';err.classList.add('show');return}
+  if(!address){err.textContent='Paste an address first.';err.classList.add('show');return}
   try{
     const response=await fetch(CONFIG.HORIZON+'/accounts/'+encodeURIComponent(address));
-    if(response.status===404)throw new Error('Carteira não encontrada na Mainnet.');
-    if(!response.ok)throw new Error('Erro HTTP '+response.status);
+    if(response.status===404)throw new Error('Wallet not found on Mainnet.');
+    if(!response.ok)throw new Error('HTTP error '+response.status);
     const account=await response.json();
     const native=account.balances.find(b=>b.asset_type==='native')||{};
-    out.innerHTML='<div class="result-row"><span>saldo disponível</span><b>'+fmtPi(native.balance,7)+' Pi</b></div>'+
-      '<div class="result-row"><span>sequência</span><b>'+fmt(account.sequence)+'</b></div>'+
-      '<div class="result-row"><span>subentradas</span><b>'+fmt(account.subentry_count)+'</b></div>';
+    out.innerHTML='<div class="result-row"><span>available balance</span><b>'+fmtPi(native.balance,7)+' Pi</b></div>'+
+      '<div class="result-row"><span>sequence</span><b>'+fmt(account.sequence)+'</b></div>'+
+      '<div class="result-row"><span>subentries</span><b>'+fmt(account.subentry_count)+'</b></div>';
     out.classList.add('show');
   }catch(error){err.textContent=error.message;err.classList.add('show')}
 }
