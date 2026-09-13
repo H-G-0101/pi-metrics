@@ -40,6 +40,11 @@ const D1_SYNC_URL = WORKER_BASE ? `${WORKER_BASE}/d1/sync` : '';
 const D1_RESTORE_URL = WORKER_BASE ? `${WORKER_BASE}/d1/restore` : '';
 const D1_SEED_LIMIT = Math.max(100, Number(process.env.D1_SEED_LIMIT || 15000));
 const D1_BATCH_SIZE = 32;
+// Free tier do D1: 100.000 linhas escritas por dia (UTC). Cada carteira grava a
+// linha da tabela + a linha do índice idx_wallets_second_at, então o custo real
+// é ~2 linhas por carteira. 0 desliga o controle (plano pago).
+const D1_DAILY_ROW_BUDGET = Math.max(0, Number(process.env.D1_DAILY_ROW_BUDGET || 85000));
+const D1_ROWS_PER_WALLET = Math.max(1, Number(process.env.D1_ROWS_PER_WALLET || 2));
 const CK = process.env.CHECKPOINT_FILE || './checkpoint.json';
 const CK_PARTS = `${CK}.parts`;
 const CHECKPOINT_SHARD_SIZE = Math.max(1000, Number(process.env.CHECKPOINT_SHARD_SIZE || 25000));
@@ -65,6 +70,7 @@ function emptyState() {
     lastSeenAt: null,
     d1Ready: false,
     d1SeedOffset: 0,
+    d1Budget: { day: '', rows: 0 },
   };
 }
 
@@ -97,6 +103,9 @@ function loadState() {
       saved.recentScan ||= null;
       saved.d1Ready ||= false;
       saved.d1SeedOffset = Number(saved.d1SeedOffset || 0);
+      saved.d1Budget = saved.d1Budget && typeof saved.d1Budget === 'object'
+        ? { day: String(saved.d1Budget.day || ''), rows: Number(saved.d1Budget.rows || 0) }
+        : { day: '', rows: 0 };
       return saved;
     }
     console.log('Checkpoint antigo ou incompatível; iniciando o índice correto do zero.');
@@ -109,6 +118,38 @@ function loadState() {
 let state = loadState();
 let d1Error = null;
 let d1Enabled = Boolean(D1_SYNC_URL && D1_RESTORE_URL && PUSH_TOKEN);
+let d1Paused = false;
+
+const utcDay = () => new Date().toISOString().slice(0, 10);
+
+function budget() {
+  if (!state.d1Budget || state.d1Budget.day !== utcDay()) {
+    state.d1Budget = { day: utcDay(), rows: 0 };
+  }
+  return state.d1Budget;
+}
+
+function budgetLeft() {
+  if (!D1_DAILY_ROW_BUDGET) return Number.POSITIVE_INFINITY;
+  return Math.max(0, D1_DAILY_ROW_BUDGET - budget().rows);
+}
+
+function spendBudget(rows) { budget().rows += rows; }
+function exhaustBudget() { budget().rows = D1_DAILY_ROW_BUDGET || Number.MAX_SAFE_INTEGER; }
+
+// Estouro de cota não é falha do crawler: o índice local continua válido.
+function isQuotaError(message) {
+  return /row write limit|daily row|exceeded .*limit|free tier/i.test(String(message || ''));
+}
+
+function pauseD1(message, exhaust = false) {
+  if (exhaust) exhaustBudget();
+  d1Enabled = false;
+  d1Paused = true;
+  d1Error = message;
+  console.log(`D1 pausado até o próximo dia UTC (${message}).`);
+  console.log('O índice continua no checkpoint local; a sincronização recomeça no próximo run.');
+}
 
 function d1Meta(complete = false) {
   return {
@@ -155,7 +196,18 @@ async function syncD1Wallets(wallets, meta = null) {
   const rows = wallets.filter(Boolean);
   // One historical page and its cursor must commit together.
   if (rows.length > 200) throw new Error('D1 page exceeds 200 wallets');
-  await callD1(D1_SYNC_URL, {method:'POST', body:JSON.stringify({wallets:rows,meta})});
+  const cost = rows.length * D1_ROWS_PER_WALLET + (meta ? 1 : 0);
+  if (cost > budgetLeft()) {
+    pauseD1('orçamento diário de escrita atingido', true);
+    return;
+  }
+  try {
+    await callD1(D1_SYNC_URL, {method:'POST', body:JSON.stringify({wallets:rows,meta})});
+    spendBudget(cost);
+  } catch (error) {
+    if (isQuotaError(error.message)) { pauseD1(error.message, true); return; }
+    throw error;
+  }
 }
 
 async function restoreFromD1() {
@@ -173,6 +225,19 @@ async function restoreFromD1() {
     if (meta.wallet && meta.wallet !== WALLET) throw new Error('D1 wallet mismatch');
     if (checkpointLoaded && BigInt(state.cursor || '0') >= BigInt(meta.cursor || '0')) {
       if(meta.formatVersion===26 && state.cursor===meta.cursor){state.d1Ready=true;return true;}
+      // O checkpoint local está à frente do D1 (sync interrompida por cota, por
+      // exemplo). Rebobinar o cursor até o ponto do D1 custa páginas do Horizon,
+      // mas é idempotente e evita recopiar milhões de carteiras.
+      if (meta.formatVersion === 26 && meta.cursor) {
+        console.log(`Checkpoint à frente do D1; rebobinando o cursor para ${meta.cursor}.`);
+        state.cursor = meta.cursor;
+        state.pages = Number(meta.pages || 0);
+        state.scannedRecords = Number(meta.scannedRecords || 0);
+        state.claimableBalances = Number(meta.claimableBalances || 0);
+        state.d1Ready = true;
+        state.d1SeedOffset = 0;
+        return true;
+      }
       // Recopy a frozen local snapshot, including entries changed since an old seed.
       state.d1SeedOffset=0;
       return false;
@@ -203,16 +268,32 @@ async function restoreFromD1() {
 async function seedD1() {
   if(!d1Enabled || state.d1Ready)return true;
   const addresses=Object.keys(state.byDest);
+  const start=Math.min(Math.max(0,Number(state.d1SeedOffset||0)),addresses.length);
   try {
     // The historical cursor is frozen until every entry has been copied.
-    await callD1(D1_SYNC_URL,{method:'POST',body:JSON.stringify({wallets:[],resetSnapshot:true,meta:{...d1Meta(false),rebuilding:true}})});
-    for(let index=0;index<addresses.length;index+=D1_BATCH_SIZE){
-      await syncD1Wallets(addresses.slice(index,index+D1_BATCH_SIZE).map(walletSnapshot));
+    if(start===0){
+      await callD1(D1_SYNC_URL,{method:'POST',body:JSON.stringify({wallets:[],resetSnapshot:true,meta:{...d1Meta(false),rebuilding:true}})});
+    }else{
+      console.log(`Retomando a cópia para o D1 a partir da carteira ${start.toLocaleString('pt-BR')}.`);
     }
+    for(let index=start;index<addresses.length;index+=D1_BATCH_SIZE){
+      if(!d1Enabled){
+        // Pausado por cota: guarda o ponto exato para o próximo run.
+        state.d1SeedOffset=index;saveCheckpoint();return false;
+      }
+      await syncD1Wallets(addresses.slice(index,index+D1_BATCH_SIZE).map(walletSnapshot));
+      state.d1SeedOffset=index+D1_BATCH_SIZE;
+      if(state.d1SeedOffset % (D1_BATCH_SIZE*200) === 0)saveCheckpoint();
+    }
+    if(!d1Enabled){saveCheckpoint();return false;}
     await syncD1Wallets([],{...d1Meta(false),walletCount:addresses.length});
     state.d1Ready=true;state.d1SeedOffset=0;d1Error=null;
     console.log('D1 frozen snapshot committed');return true;
-  }catch(error){d1Error=error.message;state.d1Ready=false;d1Enabled=false;throw error;}
+  }catch(error){
+    d1Error=error.message;state.d1Ready=false;d1Enabled=false;
+    if(isQuotaError(error.message)){pauseD1(error.message,true);saveCheckpoint();return false;}
+    throw error;
+  }
 }
 
 async function getPage(cursor, order = 'asc') {
@@ -879,6 +960,11 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   if (!seedFinished) {
     saveCheckpoint();
     await publishProgress(false);
+    if (d1Paused) {
+      console.log('Cópia para o D1 incompleta por cota; ela continua no próximo run.');
+      printSummary(await publishProgress(false));
+      return;
+    }
     console.log('A classificação histórica continuará enquanto o D1 é preenchido.');
   }
 
@@ -912,8 +998,17 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
         state.d1SeedOffset = 0;
         d1Enabled = false;
         d1Error = error.message;
-        throw error;
+        saveCheckpoint();
+        await publishProgress(false);
+        break;
       }
+    }
+
+    if (d1Paused) {
+      // Evita que o cursor local se afaste do D1 enquanto a cota está esgotada.
+      console.log('Interrompendo o avanço histórico até a cota do D1 renovar.');
+      saveCheckpoint();
+      break;
     }
 
     if (state.pages % CHECKPOINT_EVERY === 0) {
@@ -937,8 +1032,10 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   const stats = await publishProgress(complete);
   printSummary(stats);
 })().catch(async error => {
-  console.error('ERRO:', error.message);
+  const quota = isQuotaError(error.message);
+  console[quota ? 'log' : 'error'](quota ? `D1 sem cota diária: ${error.message}` : `ERRO: ${error.message}`);
   saveCheckpoint();
   await publishProgress(false);
-  process.exit(1);
+  // Cota esgotada é limite de plano, não erro do crawler: o checkpoint está salvo.
+  process.exit(quota ? 0 : 1);
 });
