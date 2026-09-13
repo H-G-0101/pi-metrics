@@ -110,6 +110,20 @@ header{
 .day-label{font:500 9px var(--mono);color:var(--muted)}
 .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:10px;margin-top:8px}
 .legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
+.insight-table{min-width:560px;margin-top:15px}
+.insight-table th:last-child,.insight-table td:last-child{text-align:right}
+.insight-table td{font:500 11px var(--mono)}
+.insight-table td:first-child{font-family:var(--sans);color:var(--muted)}
+.insight-pi{display:block;color:var(--text);font-weight:600}
+.insight-count{display:block;color:var(--muted);font-size:9px;margin-top:2px}
+.share-grid,.largest-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:16px}
+.share-card,.largest-card{background:var(--panel2);border:1px solid var(--line);border-radius:13px;padding:14px;min-width:0}
+.share-card b{display:block;font:600 23px var(--mono);color:var(--green)}
+.share-card span,.largest-label{display:block;color:var(--muted);font-size:10px;margin-top:4px}
+.largest-card .largest-amount{font:600 18px var(--mono);margin:7px 0;color:var(--purple)}
+.largest-wallet{display:flex;align-items:center;gap:7px;font:500 10px var(--mono);white-space:nowrap}
+.largest-meta{color:var(--muted);font-size:9px;margin-top:7px}
+.insight-empty{color:var(--muted);font-size:11px;padding:22px 0;text-align:center}
 
 .ranking-wrap{overflow:auto;margin-top:15px}
 table{width:100%;border-collapse:collapse;min-width:850px}
@@ -193,6 +207,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
   .stats{grid-template-columns:1fr 1fr}.stat{padding:16px;min-height:116px}
   .network-grid{grid-template-columns:repeat(2,1fr)}
   .weekly-summary{grid-template-columns:1fr}
+  .share-grid,.largest-grid{grid-template-columns:1fr}
   .input-row{flex-direction:column}button{padding:13px}
 }
 @media(max-width:430px){
@@ -280,6 +295,55 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
       </div>
       <div class="method"><b>How it is calculated:</b> claimable balances with the same recipient and transaction hash are combined into one migration event. A second distinct hash identifies the second migration.</div>
     </article>
+  </section>
+
+  <section class="section two-col">
+    <article class="panel">
+      <div class="panel-title">Daily migration volume</div>
+      <div class="panel-sub">Pi received through classified migrations over the last 14 days · UTC</div>
+      <div class="chart" id="dailyVolumeChart"><div class="empty">waiting for the updated crawler…</div></div>
+      <div class="legend"><span><i style="background:var(--blue)"></i>1st migration Pi</span><span><i style="background:var(--purple)"></i>2nd migration Pi</span></div>
+    </article>
+    <article class="panel">
+      <div class="panel-title">Second migration share</div>
+      <div class="panel-sub">Share among classified events in the last 15 days</div>
+      <div class="share-grid">
+        <div class="share-card"><b id="secondEventShare">—</b><span>share of migration events</span></div>
+        <div class="share-card"><b id="secondVolumeShare">—</b><span>share of migrated Pi</span></div>
+      </div>
+      <div class="method" id="secondShareMeta">Waiting for classified migrations…</div>
+    </article>
+  </section>
+
+  <section class="section two-col">
+    <article class="panel">
+      <div class="panel-title">Lockup distribution</div>
+      <div class="panel-sub">Pi and lockups by original lock period · last 15 days</div>
+      <div class="ranking-wrap">
+        <table class="insight-table">
+          <thead><tr><th>lock period</th><th>1st migration</th><th>2nd migration</th></tr></thead>
+          <tbody id="lockupDistributionBody"></tbody>
+        </table>
+        <div class="insight-empty" id="lockupDistributionEmpty">waiting for the updated crawler…</div>
+      </div>
+    </article>
+    <article class="panel">
+      <div class="panel-title">Migration size distribution</div>
+      <div class="panel-sub">Number of classified migration events by total Pi · last 15 days</div>
+      <div class="ranking-wrap">
+        <table class="insight-table">
+          <thead><tr><th>migration size</th><th>1st migration</th><th>2nd migration</th></tr></thead>
+          <tbody id="sizeDistributionBody"></tbody>
+        </table>
+        <div class="insight-empty" id="sizeDistributionEmpty">waiting for the updated crawler…</div>
+      </div>
+    </article>
+  </section>
+
+  <section class="section panel">
+    <div class="panel-title">Largest migrations in the last 24 hours</div>
+    <div class="panel-sub">Largest classified first and second migration events, with all lockups combined</div>
+    <div class="largest-grid" id="largest24h"><div class="insight-empty">waiting for the updated crawler…</div></div>
   </section>
 
   <section class="section panel">
@@ -391,6 +455,66 @@ function renderDaily(rows){
   }).join('');
 }
 
+function renderDailyVolume(rows){
+  const chart=$('dailyVolumeChart');
+  if(!rows.length){chart.innerHTML='<div class="empty">daily volume is not available yet</div>';return}
+  const max=Math.max(1,...rows.map(row=>Number(row.firstPi||0)+Number(row.secondPi||0)));
+  chart.innerHTML=rows.map(row=>{
+    const first=Math.max(row.firstPi?2:0,Number(row.firstPi||0)/max*100);
+    const second=Math.max(row.secondPi?2:0,Number(row.secondPi||0)/max*100);
+    const title=fmtPi(row.firstPi||0,2)+' Pi in first migrations and '+fmtPi(row.secondPi||0,2)+' Pi in second migrations on '+row.date;
+    return '<div class="day" title="'+title+'"><div class="bar-pair">'+
+      '<i class="bar first" style="height:'+first+'%"></i>'+
+      '<i class="bar second" style="height:'+second+'%"></i>'+
+      '</div><span class="day-label">'+row.date.slice(8)+'</span></div>';
+  }).join('');
+}
+
+function insightCell(bucket){
+  return '<span class="insight-pi">'+fmtPi(bucket?.totalPi||0,2)+' Pi</span><span class="insight-count">'+fmt(bucket?.lockups||0)+' lockups</span>';
+}
+
+function renderLockupDistribution(distribution){
+  const body=$('lockupDistributionBody'),empty=$('lockupDistributionEmpty');
+  const rows=[
+    ['upTo30Days','Up to 30 days'],
+    ['oneToSixMonths','1–6 months'],
+    ['sixToTwelveMonths','6–12 months'],
+    ['overOneYear','More than 1 year'],
+    ['unknown','Lock period unavailable'],
+  ];
+  if(!distribution){body.innerHTML='';empty.style.display='block';return}
+  empty.style.display='none';
+  body.innerHTML=rows.map(([key,label])=>'<tr><td>'+label+'</td><td>'+insightCell(distribution[key]?.first)+'</td><td>'+insightCell(distribution[key]?.second)+'</td></tr>').join('');
+}
+
+function renderSizeDistribution(distribution){
+  const body=$('sizeDistributionBody'),empty=$('sizeDistributionEmpty');
+  const rows=[
+    ['under100','Less than 100 Pi'],
+    ['from100To1000','100–1,000 Pi'],
+    ['from1000To10000','1,000–10,000 Pi'],
+    ['over10000','10,000 Pi or more'],
+  ];
+  if(!distribution){body.innerHTML='';empty.style.display='block';return}
+  empty.style.display='none';
+  body.innerHTML=rows.map(([key,label])=>'<tr><td>'+label+'</td><td>'+fmt(distribution[key]?.first||0)+' events</td><td>'+fmt(distribution[key]?.second||0)+' events</td></tr>').join('');
+}
+
+function largestCard(type,event){
+  if(!event)return '<div class="largest-card"><span class="largest-label">'+type+' migration</span><div class="largest-amount">—</div><div class="largest-meta">No classified event in the last 24 hours</div></div>';
+  return '<div class="largest-card"><span class="largest-label">'+type+' migration</span><div class="largest-amount">'+fmtPi(event.amountPi,7)+' Pi</div>'+
+    '<div class="largest-wallet"><span title="'+event.address+'">'+shortAddress(event.address)+'</span>'+
+    '<button class="copy-wallet" type="button" data-address="'+event.address+'" title="Copy wallet" aria-label="Copy wallet '+event.address+'">'+
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg><span class="copy-label">Copied</span></button></div>'+
+    '<div class="largest-meta">'+fmt(event.balanceCount)+' lockups · '+new Date(event.createdAt).toLocaleString('en-US')+'</div></div>';
+}
+
+function renderLargest24h(largest){
+  if(!largest){$('largest24h').innerHTML='<div class="insight-empty">waiting for the updated crawler…</div>';return}
+  $('largest24h').innerHTML=largestCard('1st',largest?.first)+largestCard('2nd',largest?.second);
+}
+
 function renderRanking(rows){
   const body=$('rankingBody'),empty=$('rankingEmpty');
   if(!rows.length){body.innerHTML='';empty.style.display='block';return}
@@ -485,7 +609,7 @@ async function copyWallet(button){
   }catch(error){button.title='Unable to copy';}
 }
 
-$('rankingBody').addEventListener('click',event=>{
+document.addEventListener('click',event=>{
   const button=event.target.closest('.copy-wallet');
   if(button)copyWallet(button);
 });
@@ -505,6 +629,8 @@ async function loadMigration(){
     const averagesReady=Number(stats.schemaVersion||0)>=11;
     const distributionReady=Number(stats.schemaVersion||0)>=12;
     const classification=averages.classification||{};
+    const insightsReady=Number(stats.schemaVersion||0)>=13;
+    const insights=stats.migrationInsights||{};
     const recent=stats.recentScan||{};
     const storage=stats.storage||{};
 
@@ -533,6 +659,11 @@ async function loadMigration(){
     $('classificationCoverageSub').textContent=!distributionReady
       ? 'waiting for the updated crawler'
       : fmt(classification.classifiedEvents||0)+' of '+fmt(classification.totalEvents||0)+' events classified';
+    $('secondEventShare').textContent=insightsReady?Number(insights.secondMigrationShare?.eventsPercent||0).toFixed(1)+'%':'Updating…';
+    $('secondVolumeShare').textContent=insightsReady?Number(insights.secondMigrationShare?.volumePercent||0).toFixed(1)+'%':'Updating…';
+    $('secondShareMeta').innerHTML=insightsReady
+      ? '<b>Classified sample:</b> '+fmt(insights.secondMigrationShare?.firstEvents||0)+' first and '+fmt(insights.secondMigrationShare?.secondEvents||0)+' second migration events.'
+      : '<b>Waiting:</b> run the schema 13 crawler to calculate these shares.';
     $('weeklyWallets').textContent=modern?fmt(weekly.walletCount):'—';
     $('onlyFirst').textContent=fmt(stats.onlyFirst);
     $('claimableCount').textContent=modern?fmt(stats.claimableBalancesScanned):fmt(stats.totalPayments);
@@ -561,6 +692,10 @@ async function loadMigration(){
     $('storageChip').className='chip '+(storage.d1Ready?'good':storage.d1SeedInProgress?'warn':'');
     $('storageChip').textContent=storage.d1Ready?'D1 persistent':storage.d1SeedInProgress?'copying to D1':'D1 waiting';
     renderDaily(Array.isArray(stats.daily)?stats.daily:[]);
+    renderDailyVolume(insightsReady&&Array.isArray(stats.daily)?stats.daily:[]);
+    renderLockupDistribution(insightsReady?insights.lockupDistribution:null);
+    renderSizeDistribution(insightsReady?insights.sizeDistribution:null);
+    renderLargest24h(insightsReady?insights.largest24h:null);
     renderRanking(Array.isArray(stats.weeklyMigrationRanking)?stats.weeklyMigrationRanking:[]);
   }catch(error){
     $('indexChip').className='chip bad';$('indexChip').textContent='statistics unavailable';

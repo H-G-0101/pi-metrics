@@ -496,16 +496,28 @@ function dailySeries(days = 14, events = classifyRecentEvents()) {
   const byDate = new Map();
   for (let offset = days - 1; offset >= 0; offset--) {
     const date = new Date(today.getTime() - offset * 86400000).toISOString().slice(0, 10);
-    const row = { date, first: 0, second: 0, pending: 0 };
+    const row = { date, first: 0, second: 0, pending: 0, firstPi: 0, secondPi: 0, pendingPi: 0 };
     rows.push(row);
     byDate.set(date, row);
   }
   for (const event of events) {
     const row = byDate.get(event.createdAt?.slice(0, 10));
     if (!row) continue;
-    if (event.migrationNumber === 1) row.first++;
-    else if (event.migrationNumber === 2) row.second++;
-    else row.pending++;
+    if (event.migrationNumber === 1) {
+      row.first++;
+      row.firstPi += Number(event.amountPi || 0);
+    } else if (event.migrationNumber === 2) {
+      row.second++;
+      row.secondPi += Number(event.amountPi || 0);
+    } else {
+      row.pending++;
+      row.pendingPi += Number(event.amountPi || 0);
+    }
+  }
+  for (const row of rows) {
+    row.firstPi = +row.firstPi.toFixed(7);
+    row.secondPi = +row.secondPi.toFixed(7);
+    row.pendingPi = +row.pendingPi.toFixed(7);
   }
   return rows;
 }
@@ -634,6 +646,99 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
   };
 }
 
+function migrationInsights(now = Date.now(), events = classifyRecentEvents()) {
+  const cutoff = now - RECENT_RETENTION_MS;
+  const cutoff24h = now - 86400000;
+  const typeBucket = () => ({ first: { lockups: 0, totalPi: 0 }, second: { lockups: 0, totalPi: 0 } });
+  const lockups = {
+    upTo30Days: typeBucket(),
+    oneToSixMonths: typeBucket(),
+    sixToTwelveMonths: typeBucket(),
+    overOneYear: typeBucket(),
+    unknown: typeBucket(),
+  };
+  const sizes = {
+    under100: { first: 0, second: 0 },
+    from100To1000: { first: 0, second: 0 },
+    from1000To10000: { first: 0, second: 0 },
+    over10000: { first: 0, second: 0 },
+  };
+  const totals = {
+    first: { events: 0, totalPi: 0 },
+    second: { events: 0, totalPi: 0 },
+  };
+  const largest24h = { first: null, second: null };
+
+  for (const event of events) {
+    const eventTime = Date.parse(event.createdAt);
+    if (eventTime < cutoff) continue;
+    const type = event.migrationNumber === 1 ? 'first' : event.migrationNumber === 2 ? 'second' : null;
+    if (!type) continue;
+    const amount = Number(event.amountPi || 0);
+    totals[type].events++;
+    totals[type].totalPi += amount;
+
+    const sizeKey = amount < 100
+      ? 'under100'
+      : amount < 1000
+        ? 'from100To1000'
+        : amount < 10000
+          ? 'from1000To10000'
+          : 'over10000';
+    sizes[sizeKey][type]++;
+
+    for (const tranche of event.tranches || []) {
+      const seconds = Number(tranche.lockSeconds);
+      const lockKey = tranche.lockSeconds == null || !Number.isFinite(seconds)
+        ? 'unknown'
+        : seconds <= 30 * 86400
+          ? 'upTo30Days'
+          : seconds <= 183 * 86400
+            ? 'oneToSixMonths'
+            : seconds <= 365 * 86400
+              ? 'sixToTwelveMonths'
+              : 'overOneYear';
+      lockups[lockKey][type].lockups++;
+      lockups[lockKey][type].totalPi += Number(tranche.amountPi || 0);
+    }
+
+    if (eventTime >= cutoff24h && (!largest24h[type] || amount > largest24h[type].amountPi)) {
+      largest24h[type] = {
+        address: event.address,
+        transactionHash: event.transactionHash,
+        createdAt: event.createdAt,
+        amountPi: +amount.toFixed(7),
+        balanceCount: Number(event.balanceCount || 0),
+        migrationNumber: event.migrationNumber,
+      };
+    }
+  }
+
+  for (const bucket of Object.values(lockups)) {
+    bucket.first.totalPi = +bucket.first.totalPi.toFixed(7);
+    bucket.second.totalPi = +bucket.second.totalPi.toFixed(7);
+  }
+  totals.first.totalPi = +totals.first.totalPi.toFixed(7);
+  totals.second.totalPi = +totals.second.totalPi.toFixed(7);
+  const classifiedEvents = totals.first.events + totals.second.events;
+  const classifiedPi = totals.first.totalPi + totals.second.totalPi;
+
+  return {
+    days: Math.round(RECENT_RETENTION_MS / 86400000),
+    lockupDistribution: lockups,
+    sizeDistribution: sizes,
+    secondMigrationShare: {
+      eventsPercent: classifiedEvents ? +(totals.second.events / classifiedEvents * 100).toFixed(2) : 0,
+      volumePercent: classifiedPi ? +(totals.second.totalPi / classifiedPi * 100).toFixed(2) : 0,
+      firstEvents: totals.first.events,
+      secondEvents: totals.second.events,
+      firstPi: totals.first.totalPi,
+      secondPi: totals.second.totalPi,
+    },
+    largest24h,
+  };
+}
+
 function buildReport({ complete }) {
   const now = Date.now();
   pruneRecentEvents(now);
@@ -673,9 +778,10 @@ function buildReport({ complete }) {
   );
   const week = weeklyMetrics(now, recent);
   const averages = migrationAverages(now, recent);
+  const insights = migrationInsights(now, recent);
 
   return {
-    schemaVersion: 12,
+    schemaVersion: 13,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,
@@ -692,6 +798,7 @@ function buildReport({ complete }) {
     uniqueMigrationRecipients: entries.length,
     daily: dailySeries(14, recent),
     migrationAverages: averages,
+    migrationInsights: insights,
     weekly: {
       from: week.cutoff,
       to: new Date(now).toISOString(),

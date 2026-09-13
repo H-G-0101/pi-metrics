@@ -38,6 +38,10 @@ A mesma janela também exibe o volume total e a mediana separados por primeira e
 segunda migração. A cobertura de classificação informa quantos eventos recentes
 já foram associados com segurança a uma dessas duas rodadas.
 
+Os insights adicionais usam os mesmos eventos agrupados por destinatário e hash:
+distribuição dos lockups por duração, volume diário de Pi, participação da segunda
+migração, faixas de tamanho e maiores eventos classificados das últimas 24 horas.
+
 ## Estrutura
 
 ```

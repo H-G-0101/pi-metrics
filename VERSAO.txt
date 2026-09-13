@@ -1,4 +1,4 @@
-PI Metrics — version 22 (migration distribution metrics)
+PI Metrics — version 23 (complete migration insights)
 Package date: 2026-09-13
 
 Inclui:
@@ -9,6 +9,11 @@ Inclui:
 - binding permanente do D1 `pi-migrations` no wrangler.toml;
 - volume e mediana separados para primeira e segunda migração nos últimos 15 dias;
 - cobertura de classificação com total de eventos classificados e analisados;
+- distribuição dos lockups por duração, separada por primeira e segunda migração;
+- gráfico diário de volume de Pi para primeira e segunda migração;
+- participação da segunda migração por eventos e volume de Pi;
+- distribuição das migrações por faixa de valor;
+- maior primeira e segunda migração das últimas 24 horas, com botão de cópia;
 - ranking semanal das 20 carteiras que mais receberam Pi;
 - publicação parcial do progresso durante a indexação;
 - atualização automática do painel a cada 10 segundos.
