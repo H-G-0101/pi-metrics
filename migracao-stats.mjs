@@ -879,6 +879,10 @@ function buildReport({ complete }) {
   for (const event of recent) {
     if (event.migrationNumber !== 2) continue;
     secondAddresses.add(event.address);
+    // Quem tem 2ª migração necessariamente teve a 1ª, mesmo que ela seja
+    // anterior ao início do índice. Sem isto o total de 2ªs poderia superar
+    // o de 1ªs, o que é impossível.
+    firstAddresses.add(event.address);
     const eventTime = Date.parse(event.createdAt);
     if (eventTime >= now - 86400000) second24hAddresses.add(event.address);
     if (eventTime >= now - WEEK_MS) second7dAddresses.add(event.address);
