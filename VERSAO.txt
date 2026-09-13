@@ -1,10 +1,11 @@
-PI Metrics — version 19 (1st and 2nd migration averages)
+PI Metrics — version 20 (migration averages status)
 Package date: 2026-09-13
 
 Inclui:
 - nova home com todas as estatísticas organizadas;
 - rastreamento separado da primeira e da segunda migração;
 - soma das parcelas create_claimable_balance da mesma transação;
+- aviso claro enquanto o Worker ainda contém estatísticas do crawler antigo;
 - ranking semanal das 20 carteiras que mais receberam Pi;
 - publicação parcial do progresso durante a indexação;
 - atualização automática do painel a cada 10 segundos.

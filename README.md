@@ -30,7 +30,9 @@ a identificação de onde termina uma carteira e começa a próxima.
 
 A visão geral inclui médias separadas de primeira e segunda migração nos últimos
 15 dias. Cada evento entra uma vez na média, depois da soma de todos os lockups
-com o mesmo destinatário e hash; eventos pendentes não entram no cálculo.
+com o mesmo destinatário e hash; eventos pendentes não entram no cálculo. Enquanto
+o Worker ainda estiver servindo um relatório anterior ao schema 11, os cards
+informam que estão aguardando a execução do crawler atualizado.
 
 ## Estrutura
 

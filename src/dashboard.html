@@ -497,6 +497,7 @@ async function loadMigration(){
     const modern=Number(stats.schemaVersion||0)>=3;
     const weekly=stats.weekly||{};
     const averages=stats.migrationAverages||{};
+    const averagesReady=Number(stats.schemaVersion||0)>=11;
     const recent=stats.recentScan||{};
     const storage=stats.storage||{};
 
@@ -505,14 +506,18 @@ async function loadMigration(){
     $('second24h').textContent=modern?fmt(stats.secondMigrationLast24h):'—';
     $('second7d').textContent=modern?fmt(stats.secondMigrationLast7d):'—';
     $('weeklyPi').textContent=modern?fmtPi(weekly.totalPi,2)+' Pi':'—';
-    $('averageFirst').textContent=averages.first?.averagePi!=null?fmtPi(averages.first.averagePi,2)+' Pi':'—';
-    $('averageSecond').textContent=averages.second?.averagePi!=null?fmtPi(averages.second.averagePi,2)+' Pi':'—';
-    $('averageFirstSub').textContent=averages.first?.events
-      ? 'lockups combined · '+fmt(averages.first.events)+' classified events'
-      : 'no classified events in this window';
-    $('averageSecondSub').textContent=averages.second?.events
-      ? 'lockups combined · '+fmt(averages.second.events)+' classified events'
-      : 'no classified events in this window';
+    $('averageFirst').textContent=!averagesReady?'Updating…':averages.first?.averagePi!=null?fmtPi(averages.first.averagePi,2)+' Pi':'—';
+    $('averageSecond').textContent=!averagesReady?'Updating…':averages.second?.averagePi!=null?fmtPi(averages.second.averagePi,2)+' Pi':'—';
+    $('averageFirstSub').textContent=!averagesReady
+      ? 'waiting for the updated crawler'
+      : averages.first?.events
+        ? 'lockups combined · '+fmt(averages.first.events)+' classified events'
+        : 'no classified events in this window';
+    $('averageSecondSub').textContent=!averagesReady
+      ? 'waiting for the updated crawler'
+      : averages.second?.events
+        ? 'lockups combined · '+fmt(averages.second.events)+' classified events'
+        : 'no classified events in this window';
     $('weeklyWallets').textContent=modern?fmt(weekly.walletCount):'—';
     $('onlyFirst').textContent=fmt(stats.onlyFirst);
     $('claimableCount').textContent=modern?fmt(stats.claimableBalancesScanned):fmt(stats.totalPayments);
