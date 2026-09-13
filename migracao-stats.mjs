@@ -12,8 +12,11 @@
 
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 
@@ -37,6 +40,8 @@ const D1_RESTORE_URL = WORKER_BASE ? `${WORKER_BASE}/d1/restore` : '';
 const D1_SEED_LIMIT = Math.max(100, Number(process.env.D1_SEED_LIMIT || 15000));
 const D1_BATCH_SIZE = 32;
 const CK = process.env.CHECKPOINT_FILE || './checkpoint.json';
+const CK_PARTS = `${CK}.parts`;
+const CHECKPOINT_SHARD_SIZE = Math.max(1000, Number(process.env.CHECKPOINT_SHARD_SIZE || 25000));
 const OUT = process.env.OUTPUT_FILE || './migracao-stats.json';
 const STATE_VERSION = 3;
 const WEEK_MS = 7 * 86400000;
@@ -71,6 +76,19 @@ function loadState() {
       && saved.wallet === WALLET
       && saved.recoveryWallet === RECOVERY_WALLET;
     if (compatible) {
+      if (saved.sharded) {
+        const byDest = {};
+        const shardCount = Number(saved.shardCount || 0);
+        for (let index = 0; index < shardCount; index++) {
+          const part = `${CK_PARTS}/part-${String(index).padStart(5, '0')}.json`;
+          if (!existsSync(part)) throw new Error(`parte ausente: ${part}`);
+          for (const [address, entry] of JSON.parse(readFileSync(part, 'utf8'))) {
+            byDest[address] = entry;
+          }
+        }
+        saved.byDest = byDest;
+        console.log(`Checkpoint restaurado em ${shardCount.toLocaleString('pt-BR')} partes.`);
+      }
       checkpointLoaded = true;
       saved.recentEvents ||= {};
       delete saved.recentCreateAccountTxs;
@@ -410,13 +428,43 @@ function pruneRecentEvents(now = Date.now()) {
 
 function saveCheckpoint() {
   pruneRecentEvents();
+  mkdirSync(CK_PARTS, { recursive: true });
+  let shard = [];
+  let shardCount = 0;
+  const flushShard = () => {
+    if (!shard.length) return;
+    const part = `${CK_PARTS}/part-${String(shardCount).padStart(5, '0')}.json`;
+    const tempPart = `${part}.tmp`;
+    writeFileSync(tempPart, JSON.stringify(shard));
+    renameSync(tempPart, part);
+    shard = [];
+    shardCount++;
+  };
+  for (const address in state.byDest) {
+    if (!Object.hasOwn(state.byDest, address)) continue;
+    shard.push([address, state.byDest[address]]);
+    if (shard.length >= CHECKPOINT_SHARD_SIZE) flushShard();
+  }
+  flushShard();
+
   const temp = `${CK}.tmp`;
-  // A janela recente é reconstruída no início de cada execução e não precisa
-  // ser duplicada no checkpoint, que já contém o grande índice histórico.
-  // Mantê-la somente em memória evita ultrapassar o limite de string do Node.
-  const checkpointState = { ...state, recentEvents: {}, recentCreatedAccountKeys: {} };
+  // O índice histórico é dividido em arquivos menores e a janela recente não
+  // é duplicada. Assim nenhuma chamada de JSON.stringify recebe milhões de linhas.
+  const checkpointState = {
+    ...state,
+    byDest: {},
+    recentEvents: {},
+    recentCreatedAccountKeys: {},
+    sharded: true,
+    shardCount,
+  };
   writeFileSync(temp, JSON.stringify(checkpointState));
   renameSync(temp, CK);
+
+  for (const filename of readdirSync(CK_PARTS)) {
+    const match = /^part-(\d{5})\.json$/.exec(filename);
+    if (match && Number(match[1]) >= shardCount) unlinkSync(`${CK_PARTS}/${filename}`);
+  }
 }
 
 function classifyRecentEvents() {
