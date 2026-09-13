@@ -14,10 +14,13 @@ env:
   THROTTLE_MS: "40"
   RECENT_PUSH_EVERY_PAGES: "25"
   D1_SEED_LIMIT: "15000"
+  # Free tier do D1 = 100.000 linhas/dia (UTC). Deixe folga; use "0" no plano pago.
+  D1_DAILY_ROW_BUDGET: "85000"
 
 concurrency:
   group: crawl-migracao-pi
-  cancel-in-progress: true
+  # Cancelar no meio mata o run antes de ele salvar o checkpoint.
+  cancel-in-progress: false
 
 jobs:
   crawl:
@@ -36,7 +39,11 @@ jobs:
       - name: Restore checkpoint
         uses: actions/cache/restore@v4
         with:
-          path: checkpoint.json
+          # O índice é shardado: sem a pasta .parts o checkpoint.json fica
+          # inválido ("parte ausente") e o crawler recomeça do zero.
+          path: |
+            checkpoint.json
+            checkpoint.json.parts
           key: pi-ckpt-${{ github.run_id }}
           restore-keys: pi-ckpt-
 
@@ -48,7 +55,9 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: checkpoint.json
+          path: |
+            checkpoint.json
+            checkpoint.json.parts
           key: pi-ckpt-${{ github.run_id }}
 
       - name: Upload result
