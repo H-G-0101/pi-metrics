@@ -750,6 +750,13 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
       classifiedEvents,
       pendingEvents: Math.max(0, totalEvents - classifiedEvents),
       coveragePercent: totalEvents ? +(classifiedEvents / totalEvents * 100).toFixed(2) : 0,
+      // Verificado = sinal on-chain direto ou hash conhecido pelo índice.
+      // O restante é inferência e não conta aqui.
+      verifiedEvents: sources.createAccount + sources.index,
+      inferredEvents: sources.inferred,
+      verifiedPercent: totalEvents
+        ? +((sources.createAccount + sources.index) / totalEvents * 100).toFixed(2)
+        : 0,
       sources,
     },
   };

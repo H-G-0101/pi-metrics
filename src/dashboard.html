@@ -279,7 +279,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
       <article class="stat primary"><div class="stat-label">2nd migration volume · 15 days</div><div class="stat-value" id="volumeSecond">—</div><div class="stat-sub">sum of classified 2nd migrations</div></article>
       <article class="stat blue"><div class="stat-label">Median 1st migration · 15 days</div><div class="stat-value" id="medianFirst">—</div><div class="stat-sub">middle classified event value</div></article>
       <article class="stat primary"><div class="stat-label">Median 2nd migration · 15 days</div><div class="stat-value" id="medianSecond">—</div><div class="stat-sub">middle classified event value</div></article>
-      <article class="stat green"><div class="stat-label">Classification coverage · 15 days</div><div class="stat-value" id="classificationCoverage">—</div><div class="stat-sub" id="classificationCoverageSub">classified recent events</div></article>
+      <article class="stat green"><div class="stat-label">Verified classification · 15 days</div><div class="stat-value" id="classificationCoverage">—</div><div class="stat-sub" id="classificationCoverageSub">classified recent events</div></article>
       <article class="stat"><div class="stat-label">Wallets receiving Pi · 7 days</div><div class="stat-value" id="weeklyWallets">—</div><div class="stat-sub">1st or 2nd migration</div></article>
       <article class="stat amber"><div class="stat-label">Only 1st migration detected</div><div class="stat-value" id="onlyFirst">—</div><div class="stat-sub">no second hash in the index</div></article>
       <article class="stat"><div class="stat-label">Claimable balances analyzed</div><div class="stat-value" id="claimableCount">—</div><div class="stat-sub">short- and long-term lockups</div></article>
@@ -462,6 +462,7 @@ function setupRefinedLayout(){
     ['averageSecond','Total Pi divided by classified second migration events. Large migrations can raise the average. Lockups for the same wallet and hash are combined.'],
     ['medianFirst','The middle value after sorting classified first migrations by Pi received. For an even sample, the two middle values are averaged.'],
     ['medianSecond','The middle value after sorting classified second migrations by Pi received. It is less influenced by unusually large migrations.'],
+    ['classificationCoverage','Share of recent events backed by direct evidence: a create_account in the same transaction, or a transaction hash already present in the historical index. Remaining events are counted as second migrations by inference, because the account existed before the event. This share grows as the index accumulates new migrations.'],
     ['firstTotal','Wallets with at least one detected migration. Wallets with a second migration are also included here. Preserved totals may exceed the currently rebuilt index.'],
     ['secondTotal','Wallets with a detected second distinct migration transaction. This is a wallet count, not a count of lockups.']
   ]){
@@ -731,11 +732,13 @@ async function loadMigration(){
     $('volumeSecond').textContent=!distributionReady?'Updating…':fmtPi(averages.second?.totalPi||0,2)+' Pi';
     $('medianFirst').textContent=!distributionReady?'Updating…':averages.first?.medianPi!=null?fmtPi(averages.first.medianPi,2)+' Pi':'—';
     $('medianSecond').textContent=!distributionReady?'Updating…':averages.second?.medianPi!=null?fmtPi(averages.second.medianPi,2)+' Pi':'—';
-    $('classificationCoverage').textContent=!distributionReady?'Updating…':Number(classification.coveragePercent||0).toFixed(1)+'%';
+    $('classificationCoverage').textContent=!distributionReady?'Updating…':Number(classification.verifiedPercent!=null?classification.verifiedPercent:classification.coveragePercent||0).toFixed(1)+'%';
     $('classificationCoverageSub').textContent=!distributionReady
       ? 'waiting for the updated crawler'
-      : fmt(classification.classifiedEvents||0)+' of '+fmt(classification.totalEvents||0)+' events classified'
-        +(classification.sources?.inferred?' · '+fmt(classification.sources.inferred)+' inferred':'');
+      : classification.verifiedEvents!=null
+        ? fmt(classification.verifiedEvents)+' verified of '+fmt(classification.totalEvents||0)+' events'
+          +(classification.inferredEvents?' · '+fmt(classification.inferredEvents)+' inferred':'')
+        : fmt(classification.classifiedEvents||0)+' of '+fmt(classification.totalEvents||0)+' events classified';
     $('secondEventShare').textContent=insightsReady?Number(insights.secondMigrationShare?.eventsPercent||0).toFixed(1)+'%':'Updating…';
     $('secondVolumeShare').textContent=insightsReady?Number(insights.secondMigrationShare?.volumePercent||0).toFixed(1)+'%':'Updating…';
     $('secondShareMeta').innerHTML=insightsReady
