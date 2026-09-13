@@ -1,5 +1,5 @@
-PI Metrics — versão 6 (carregamento semanal progressivo)
-Data do pacote: 2026-09-12
+PI Metrics — version 18 (clear alternating wallet groups)
+Package date: 2026-09-13
 
 Inclui:
 - nova home com todas as estatísticas organizadas;
@@ -7,8 +7,33 @@ Inclui:
 - soma das parcelas create_claimable_balance da mesma transação;
 - ranking semanal das 20 carteiras que mais receberam Pi;
 - publicação parcial do progresso durante a indexação;
-- atualização automática do painel a cada 60 segundos.
+- atualização automática do painel a cada 10 segundos.
 - leitura recente separada: ranking, valores, resumo semanal e gráfico de 14 dias
   são preenchidos antes de terminar o índice histórico.
 - a primeira página recente é publicada imediatamente; as demais aparecem
   progressivamente, sem esperar a varredura completa dos 15 dias.
+- a home consulta novas estatísticas a cada 10 segundos e ignora caches antigos.
+- o índice de carteiras e o cursor são copiados para o D1 em lotes;
+- se o cache do GitHub for perdido, o crawler restaura o progresso pelo D1.
+- os cartões de 2ª migração em 24 horas e 7 dias usam também a leitura recente;
+- uma execução nova do workflow cancela automaticamente a antiga.
+- a cópia inicial para o D1 não pausa mais o avanço do índice histórico;
+- carteiras “em análise” passam a ser classificadas enquanto o D1 é preenchido.
+- o Top 20 semanal possui botão para copiar o endereço completo da carteira.
+- o Top 20 mostra o saldo disponível atual de cada carteira, com cache de 5 minutos;
+- cada parcela mostra valor e duração do bloqueio em dias, semanas, meses ou anos.
+- toda a interface da home e do inspetor foi convertida para inglês;
+- “parcelas” foi substituído por “lockups” e “lockup schedule”.
+- os eventos recentes permanecem no relatório, mas não são duplicados no checkpoint;
+- corrige `RangeError: Invalid string length` após a leitura dos últimos 15 dias.
+- identifica imediatamente a primeira migração quando `create_account` aparece
+  na mesma transação dos `create_claimable_balance`;
+- corrige o contador semanal de eventos de primeira migração que permanecia zero.
+- exige que `create_account` e `create_claimable_balance` tenham a mesma carteira
+  destinatária, evitando marcar como primeira todas as pessoas de um lote;
+- corrige casos de segunda migração exibidos incorretamente como primeira.
+- divide o índice histórico em arquivos menores de checkpoint;
+- evita `Invalid string length` mesmo após milhões de carteiras;
+- o workflow salva e restaura `checkpoint.json` junto com `checkpoint.json.parts`.
+- cada carteira e seus lockups agora compartilham a mesma tonalidade;
+- os grupos alternam entre fundo claro e escuro, com bordas laterais e separadores.

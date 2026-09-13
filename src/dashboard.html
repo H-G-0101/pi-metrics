@@ -116,7 +116,12 @@ table{width:100%;border-collapse:collapse;min-width:850px}
 th{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
 td{padding:11px 10px;border-bottom:1px solid rgba(37,44,64,.7);font-size:12px}
 tbody tr:last-child td{border-bottom:0}
-tbody tr:hover{background:rgba(255,255,255,.018)}
+.wallet-row td{border-bottom:0;transition:background .18s}
+.wallet-row.tone-light td,.tranche-row.tone-light td{background:rgba(255,255,255,.038)}
+.wallet-row.tone-dark td,.tranche-row.tone-dark td{background:rgba(4,7,14,.34)}
+.wallet-row.tone-light td:first-child,.tranche-row.tone-light td:first-child{border-left:3px solid rgba(179,108,255,.72)}
+.wallet-row.tone-dark td:first-child,.tranche-row.tone-dark td:first-child{border-left:3px solid rgba(88,166,255,.42)}
+.wallet-row:hover td,.wallet-row:hover+.tranche-row td{background:rgba(179,108,255,.075)}
 .rank{color:var(--purple);font:600 11px var(--mono)}
 .address{font:500 11px var(--mono);white-space:nowrap}
 .address-cell{display:inline-flex;align-items:center;gap:7px}
@@ -133,7 +138,7 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
 .amount{text-align:right;font:600 11px var(--mono);white-space:nowrap}
 .current-balance{font:600 11px var(--mono);white-space:nowrap;color:var(--blue)}
 .current-balance.loading{color:var(--muted);font-size:9px}
-.tranche-row td{padding:0 10px 12px 52px;background:rgba(9,11,20,.34);border-bottom:1px solid rgba(37,44,64,.7)}
+.tranche-row td{padding:0 10px 13px 68px;border-bottom:2px solid rgba(50,59,82,.85)}
 .tranches{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-top:9px}
 .tranches-label{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.07em;margin-right:2px}
 .tranche{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font:500 9px var(--mono);white-space:nowrap}
@@ -383,7 +388,8 @@ function renderRanking(rows){
   const body=$('rankingBody'),empty=$('rankingEmpty');
   if(!rows.length){body.innerHTML='';empty.style.display='block';return}
   empty.style.display='none';
-  body.innerHTML=rows.map(row=>{
+  body.innerHTML=rows.map((row,index)=>{
+    const tone=index%2===0?'tone-light':'tone-dark';
     const migrationType=englishMigrationType(row.migrationType);
     const cls=migrationType==='2nd'?'type second':'type';
     const cached=balanceCache.get(row.address);
@@ -395,7 +401,7 @@ function renderRanking(rows){
       const until=tranche.unlockAt?' · unlock date '+new Date(tranche.unlockAt).toLocaleDateString('en-US') : '';
       return '<span class="tranche '+(unlocked?'unlocked':'')+'" title="Lockup '+(index+1)+until+'"><b>'+migration+' migration · '+fmtPi(tranche.amountPi,7)+' Pi</b><span class="lock">'+(unlocked?'lock period ended':'locked for '+lock)+'</span></span>';
     }).join('');
-    return '<tr><td class="rank">#'+row.rank+'</td>'+
+    return '<tr class="wallet-row '+tone+'"><td class="rank">#'+row.rank+'</td>'+
       '<td class="address"><span class="address-cell"><span title="'+row.address+'">'+shortAddress(row.address)+'</span>'+
       '<button class="copy-wallet" type="button" data-address="'+row.address+'" title="Copy wallet" aria-label="Copy wallet '+row.address+'">'+
       '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg><span class="copy-label">Copied</span></button></span></td>'+
@@ -403,7 +409,7 @@ function renderRanking(rows){
       '<td>'+fmt(row.balanceCount)+'</td>'+
       '<td class="current-balance '+(cached?'':'loading')+'" data-balance="'+row.address+'">'+balance+'</td>'+
       '<td class="amount">'+fmtPi(row.amountPi,7)+' Pi</td></tr>'+
-      '<tr class="tranche-row"><td colspan="6"><div class="tranches"><span class="tranches-label">lockup schedule</span>'+
+      '<tr class="tranche-row '+tone+'"><td colspan="6"><div class="tranches"><span class="tranches-label">lockup schedule</span>'+
       (tranches||'<span class="tranche"><span class="lock">waiting for the next scan…</span></span>')+'</div></td></tr>';
   }).join('');
   loadRankingBalances(rows);

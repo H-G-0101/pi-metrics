@@ -3,6 +3,31 @@
 Um painel ao vivo da rede Pi mainnet e uma estatística de quem já recebeu a 2ª migração.
 Tudo roda hospedado: o app num **Cloudflare Worker**, o crawl no **GitHub Actions**. Sem PC.
 
+No Top 20 semanal, o botão ao lado de cada endereço copia a carteira completa e
+confirma visualmente a ação.
+
+O ranking também exibe o saldo disponível atual e detalha cada parcela criada
+pela migração, incluindo valor e duração do bloqueio. O prazo é calculado a
+partir do predicado do destinatário no `create_claimable_balance`.
+
+Para manter o checkpoint abaixo do limite de serialização do Node.js, a janela
+recente é publicada no relatório, mas não é duplicada no `checkpoint.json`.
+Ela é reconstruída pelo Horizon no começo de cada execução.
+
+Na janela recente, uma transação com `create_account` e
+`create_claimable_balance` para o mesmo destinatário é classificada imediatamente
+como primeira migração, mesmo antes de o cursor histórico alcançar essa conta.
+Essa confirmação exige correspondência da carteira criada com o destinatário;
+compartilhar apenas o mesmo hash de um lote não é suficiente.
+
+O índice histórico é salvo em partes dentro de `checkpoint.json.parts`, enquanto
+`checkpoint.json` guarda somente os metadados. O workflow deve armazenar os dois
+caminhos para permitir a retomada de índices com milhões de carteiras.
+
+No ranking, a linha principal e o respectivo lockup schedule formam um único
+grupo visual. Os grupos alternam entre tonalidades clara e escura para facilitar
+a identificação de onde termina uma carteira e começa a próxima.
+
 ## Estrutura
 
 ```
@@ -51,8 +76,14 @@ Abra a URL do Worker: o painel deve carregar e a altura do ledger subir a cada p
    Nome `STATS_TOKEN`, **o mesmo valor** do secret do Worker.
 3. Aba *Actions* → "Crawl migração Pi" → **Run workflow**.
 
-O crawler percorre as operações da carteira e, quando alcança o topo da blockchain,
-envia o resultado ao Worker. O painel mostra:
+Ao iniciar, o crawler lê primeiro os últimos 15 dias em ordem decrescente e publica
+essa janela no Worker. Assim, ranking, valores semanais e gráfico de 14 dias aparecem
+sem esperar o índice histórico terminar. Depois ele retoma a leitura completa das
+operações antigas em ordem crescente. O painel mostra:
+
+A primeira página recente é publicada imediatamente. Durante a continuação da leitura,
+o painel mostra `dados parciais` e atualiza o ranking em novos lotes, sem ficar vazio.
+A home verifica o `/stats` a cada 10 segundos e usa cache desativado.
 
 - pessoas únicas com 2ª migração detectada;
 - novas 2ªs migrações nas últimas 24 horas e nos últimos 7 dias;
@@ -105,5 +136,23 @@ MAX_PAGES=1 CHECKPOINT_FILE=/tmp/pi-checkpoint.json \
 OUTPUT_FILE=/tmp/pi-stats.json node migracao-stats.mjs
 ```
 
-O resultado parcial nunca é enviado ao Worker. O envio acontece somente quando o
-crawler alcança o topo do histórico disponível no Horizon.
+O crawler publica progresso parcial a cada 250 páginas e novamente ao encerrar a
+execução. Enquanto o histórico completo não tiver sido percorrido, o painel mostra
+“índice em construção”. Eventos recentes cuja posição ainda depende do histórico
+aparecem como `em análise` e são classificados automaticamente conforme o índice
+avança. `PUSH_EVERY_PAGES` permite alterar a frequência de publicação.
+
+## Índice persistente no Cloudflare D1
+
+Além do KV `STATS`, vincule ao Worker um banco D1 com o nome de variável `DB`.
+O Worker cria/verifica as tabelas automaticamente; o mesmo esquema também está em
+`schema.sql` para execução manual no Console do D1.
+
+Na primeira execução desta versão, o crawler copia até 15.000 carteiras já conhecidas
+para o D1. Se houver mais, continua na execução seguinte sem pausar o avanço histórico.
+Esse limite mantém margem dentro das 100.000 gravações diárias do plano gratuito.
+Quando a cópia termina, a home mostra `D1 persistente`.
+
+Depois disso, cada página histórica atualiza o D1 junto com o checkpoint. Se o cache
+do GitHub Actions desaparecer, o crawler restaura do D1 as carteiras, os hashes e o
+cursor, evitando recomeçar a leitura da blockchain do zero.
