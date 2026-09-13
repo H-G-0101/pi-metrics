@@ -39,6 +39,10 @@ const SKIP_HISTORY = /^(1|true|yes|sim)$/i.test(process.env.SKIP_HISTORY || '');
 // ser a 2ª migração. Usado apenas quando o índice não conhece o hash.
 // Ponha INFER_SECOND=0 para voltar a depender só do índice.
 const INFER_SECOND = !/^(0|false|no|nao|não)$/i.test(process.env.INFER_SECOND || '1');
+// Verifica no Horizon quando a conta nasceu: transforma a inferência em fato.
+const VERIFY_ACCOUNTS = !/^(0|false|no|nao|não)$/i.test(process.env.VERIFY_ACCOUNTS || '1');
+const ACCOUNT_LOOKUP_LIMIT = Math.max(0, Number(process.env.ACCOUNT_LOOKUP_LIMIT || 40000));
+const ACCOUNT_LOOKUP_CONCURRENCY = Math.min(12, Math.max(1, Number(process.env.ACCOUNT_LOOKUP_CONCURRENCY || 6)));
 const PUSH_URL = process.env.PUSH_URL || '';
 const PUSH_TOKEN = process.env.PUSH_TOKEN || '';
 const WORKER_BASE = process.env.WORKER_BASE
@@ -79,6 +83,7 @@ function emptyState() {
     d1SeedOffset: 0,
     d1Budget: { day: '', rows: 0 },
     coverageFrom: null,
+    accountBirth: {},
   };
 }
 
@@ -112,6 +117,7 @@ function loadState() {
       saved.d1Ready ||= false;
       saved.d1SeedOffset = Number(saved.d1SeedOffset || 0);
       saved.coverageFrom = saved.coverageFrom || null;
+      saved.accountBirth = saved.accountBirth && typeof saved.accountBirth === 'object' ? saved.accountBirth : {};
       saved.d1Budget = saved.d1Budget && typeof saved.d1Budget === 'object'
         ? { day: String(saved.d1Budget.day || ''), rows: Number(saved.d1Budget.rows || 0) }
         : { day: '', rows: 0 };
@@ -492,6 +498,72 @@ async function refreshRecentEvents() {
   );
 }
 
+// Lê um caminho do Horizon com a mesma política de retry das páginas.
+async function getJson(path) {
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(HORIZON + path, {
+      signal: AbortSignal.timeout(30000),
+      headers: { Accept: 'application/json' },
+    });
+    if (response.status === 429 || response.status >= 500) {
+      if (attempt >= 5) throw new Error(`Horizon ${response.status}`);
+      await sleep(Math.min(60000, 2000 * 2 ** attempt));
+      continue;
+    }
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Horizon HTTP ${response.status} em ${path}`);
+    return response.json();
+  }
+}
+
+// A primeira operação de uma conta é o create_account que a criou. Sabendo
+// disso, um evento deixa de ser inferência: ou a conta nasceu naquela mesma
+// transação (1ª migração), ou já existia antes dela (2ª).
+async function verifyAccountOrigins() {
+  if (!VERIFY_ACCOUNTS || !ACCOUNT_LOOKUP_LIMIT) return;
+  state.accountBirth ||= {};
+  const addresses = [...new Set(Object.values(state.recentEvents).map(event => event.address))]
+    .filter(address => !state.accountBirth[address]);
+  if (!addresses.length) return;
+
+  const queue = addresses.slice(0, ACCOUNT_LOOKUP_LIMIT);
+  console.log(`Verificando a origem de ${queue.length.toLocaleString('pt-BR')} contas no Horizon…`);
+  let done = 0;
+  let failed = 0;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < queue.length) {
+      const address = queue[cursor++];
+      try {
+        const data = await getJson(`/accounts/${address}/operations?order=asc&limit=1`);
+        const first = data?._embedded?.records?.[0];
+        if (first) {
+          state.accountBirth[address] = {
+            tx: first.type === 'create_account' ? first.transaction_hash : null,
+            at: first.created_at || null,
+          };
+        }
+      } catch (error) {
+        failed++;
+      }
+      done++;
+      if (done % 5000 === 0) {
+        console.log(`  ↳ ${done.toLocaleString('pt-BR')} de ${queue.length.toLocaleString('pt-BR')} contas`);
+        saveCheckpoint();
+      }
+      await sleep(THROTTLE_MS);
+    }
+  };
+  await Promise.all(Array.from({ length: ACCOUNT_LOOKUP_CONCURRENCY }, worker));
+  const pendentes = addresses.length - queue.length;
+  console.log(
+    `Origem verificada: ${(done - failed).toLocaleString('pt-BR')} contas`
+    + (failed ? ` · ${failed.toLocaleString('pt-BR')} falhas` : '')
+    + (pendentes ? ` · ${pendentes.toLocaleString('pt-BR')} ficam para o próximo run` : ''),
+  );
+  saveCheckpoint();
+}
+
 // Move o cursor histórico para a operação mais recente da carteira. É
 // idempotente: se um rebobinamento de cursor acontecer antes, este salto o
 // anula, então o crawl nunca volta ao passado com SKIP_HISTORY ligado.
@@ -510,9 +582,17 @@ async function jumpToPresent() {
   return true;
 }
 
-function pruneRecentEvents(now = Date.now()) {  const cutoff = now - RECENT_RETENTION_MS;
+function pruneRecentEvents(now = Date.now()) {
+  const cutoff = now - RECENT_RETENTION_MS;
   for (const [key, event] of Object.entries(state.recentEvents)) {
     if (Date.parse(event.createdAt) < cutoff) delete state.recentEvents[key];
+  }
+  // O cache de origem só serve à janela recente; fora dela vira peso morto.
+  if (state.accountBirth) {
+    const alive = new Set(Object.values(state.recentEvents).map(event => event.address));
+    for (const address of Object.keys(state.accountBirth)) {
+      if (!alive.has(address)) delete state.accountBirth[address];
+    }
   }
 }
 
@@ -569,6 +649,7 @@ function classifyRecentEvents() {
 
   return rows.map(event => {
     const entry = state.byDest[event.address];
+    const birth = state.accountBirth?.[event.address];
     let migrationNumber = null;
     let classifiedBy = null;
     const createdAccountKey = `${event.transactionHash}:${event.address}`;
@@ -581,8 +662,14 @@ function classifyRecentEvents() {
       migrationNumber = 2; classifiedBy = 'index';
     } else if (entry?.lastTx === event.transactionHash) {
       migrationNumber = entry.eventCount; classifiedBy = 'index';
+    } else if (birth?.tx === event.transactionHash) {
+      // A conta nasceu nesta transação: 1ª migração, verificado no Horizon.
+      migrationNumber = 1; classifiedBy = 'account_birth';
+    } else if (birth?.at && Date.parse(birth.at) < Date.parse(event.createdAt)) {
+      // A conta já existia antes do evento: não pode ser a 1ª migração.
+      migrationNumber = 2; classifiedBy = 'account_age';
     } else if (INFER_SECOND) {
-      // A conta não nasceu nesta transação, logo já existia: 2ª migração.
+      // Sem verificação disponível, assume-se conta pré-existente.
       migrationNumber = 2; classifiedBy = 'inferred';
     }
 
@@ -732,13 +819,16 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
     };
   };
   const classifiedEvents = first.events + second.events;
-  const sources = { createAccount: 0, index: 0, inferred: 0 };
+  const sources = { createAccount: 0, index: 0, accountBirth: 0, accountAge: 0, inferred: 0 };
   for (const event of events) {
     if (Date.parse(event.createdAt) < cutoff) continue;
     if (event.classifiedBy === 'create_account') sources.createAccount++;
     else if (event.classifiedBy === 'index') sources.index++;
+    else if (event.classifiedBy === 'account_birth') sources.accountBirth++;
+    else if (event.classifiedBy === 'account_age') sources.accountAge++;
     else if (event.classifiedBy === 'inferred') sources.inferred++;
   }
+  const verified = sources.createAccount + sources.index + sources.accountBirth + sources.accountAge;
   return {
     days: Math.round(RECENT_RETENTION_MS / 86400000),
     from: new Date(cutoff).toISOString(),
@@ -752,11 +842,9 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
       coveragePercent: totalEvents ? +(classifiedEvents / totalEvents * 100).toFixed(2) : 0,
       // Verificado = sinal on-chain direto ou hash conhecido pelo índice.
       // O restante é inferência e não conta aqui.
-      verifiedEvents: sources.createAccount + sources.index,
+      verifiedEvents: verified,
       inferredEvents: sources.inferred,
-      verifiedPercent: totalEvents
-        ? +((sources.createAccount + sources.index) / totalEvents * 100).toFixed(2)
-        : 0,
+      verifiedPercent: totalEvents ? +(verified / totalEvents * 100).toFixed(2) : 0,
       sources,
     },
   };
@@ -943,6 +1031,9 @@ function buildReport({ complete }) {
       rule: 'one recipient plus one distinct transaction_hash equals one migration event',
       sourceOperation: 'create_claimable_balance',
       firstMigrationSignal: 'create_account for the same recipient in the same transaction',
+      accountOriginCheck: VERIFY_ACCOUNTS
+        ? 'the first operation of the recipient account tells whether it was created in the same transaction'
+        : 'disabled',
       secondMigrationInference: INFER_SECOND
         ? 'no create_account in the transaction means the account already existed, so the event is a second migration'
         : 'disabled',
@@ -1013,6 +1104,7 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
 
   await restoreFromD1();
   await refreshRecentEvents();
+  await verifyAccountOrigins();
   saveCheckpoint();
   await publishProgress(false);
 
@@ -1036,7 +1128,7 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   let complete = false;
   while (!MAX_PAGES || pagesThisRun < MAX_PAGES) {
     if(Date.now()-Date.parse(state.recentScan?.completedAt||0)>15*60000){
-      await refreshRecentEvents();await publishProgress(false);
+      await refreshRecentEvents();await verifyAccountOrigins();await publishProgress(false);
     }
     const page = await getPage(state.cursor);
     const records = page._embedded?.records || [];

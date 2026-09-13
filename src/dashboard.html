@@ -462,7 +462,7 @@ function setupRefinedLayout(){
     ['averageSecond','Total Pi divided by classified second migration events. Large migrations can raise the average. Lockups for the same wallet and hash are combined.'],
     ['medianFirst','The middle value after sorting classified first migrations by Pi received. For an even sample, the two middle values are averaged.'],
     ['medianSecond','The middle value after sorting classified second migrations by Pi received. It is less influenced by unusually large migrations.'],
-    ['classificationCoverage','Share of recent events backed by direct evidence: a create_account in the same transaction, or a transaction hash already present in the historical index. Remaining events are counted as second migrations by inference, because the account existed before the event. This share grows as the index accumulates new migrations.'],
+    ['classificationCoverage','Share of recent events backed by direct evidence: a create_account in the same transaction, a transaction hash already present in the historical index, or the recipient account creation date checked against Horizon. Any remaining events are counted as second migrations by inference. This share grows as the crawler verifies more accounts.'],
     ['firstTotal','Wallets with at least one detected migration. Wallets with a second migration are also included here. Preserved totals may exceed the currently rebuilt index.'],
     ['secondTotal','Wallets with a detected second distinct migration transaction. This is a wallet count, not a count of lockups.']
   ]){
