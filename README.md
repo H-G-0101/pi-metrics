@@ -28,6 +28,10 @@ No ranking, a linha principal e o respectivo lockup schedule formam um único
 grupo visual. Os grupos alternam entre tonalidades clara e escura para facilitar
 a identificação de onde termina uma carteira e começa a próxima.
 
+A visão geral inclui médias separadas de primeira e segunda migração nos últimos
+15 dias. Cada evento entra uma vez na média, depois da soma de todos os lockups
+com o mesmo destinatário e hash; eventos pendentes não entram no cálculo.
+
 ## Estrutura
 
 ```

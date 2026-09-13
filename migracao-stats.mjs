@@ -489,7 +489,7 @@ function classifyRecentEvents() {
   });
 }
 
-function dailySeries(days = 14) {
+function dailySeries(days = 14, events = classifyRecentEvents()) {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const rows = [];
@@ -500,7 +500,7 @@ function dailySeries(days = 14) {
     rows.push(row);
     byDate.set(date, row);
   }
-  for (const event of classifyRecentEvents()) {
+  for (const event of events) {
     const row = byDate.get(event.createdAt?.slice(0, 10));
     if (!row) continue;
     if (event.migrationNumber === 1) row.first++;
@@ -510,7 +510,7 @@ function dailySeries(days = 14) {
   return rows;
 }
 
-function weeklyMetrics(now = Date.now()) {
+function weeklyMetrics(now = Date.now(), events = classifyRecentEvents()) {
   const cutoff = now - WEEK_MS;
   const wallets = new Map();
   let totalPi = 0;
@@ -518,7 +518,7 @@ function weeklyMetrics(now = Date.now()) {
   let secondEvents = 0;
   let pendingEvents = 0;
 
-  for (const event of classifyRecentEvents()) {
+  for (const event of events) {
     if (Date.parse(event.createdAt) < cutoff) continue;
     totalPi += event.amountPi;
     if (event.migrationNumber === 1) firstEvents++;
@@ -588,6 +588,31 @@ function weeklyMetrics(now = Date.now()) {
   };
 }
 
+function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
+  const cutoff = now - RECENT_RETENTION_MS;
+  const first = { events: 0, totalPi: 0 };
+  const second = { events: 0, totalPi: 0 };
+  for (const event of events) {
+    if (Date.parse(event.createdAt) < cutoff) continue;
+    const bucket = event.migrationNumber === 1 ? first : event.migrationNumber === 2 ? second : null;
+    if (!bucket) continue;
+    bucket.events++;
+    bucket.totalPi += Number(event.amountPi || 0);
+  }
+  const finish = bucket => ({
+    events: bucket.events,
+    totalPi: +bucket.totalPi.toFixed(7),
+    averagePi: bucket.events ? +(bucket.totalPi / bucket.events).toFixed(7) : null,
+  });
+  return {
+    days: Math.round(RECENT_RETENTION_MS / 86400000),
+    from: new Date(cutoff).toISOString(),
+    to: new Date(now).toISOString(),
+    first: finish(first),
+    second: finish(second),
+  };
+}
+
 function buildReport({ complete }) {
   const now = Date.now();
   pruneRecentEvents(now);
@@ -625,10 +650,11 @@ function buildReport({ complete }) {
       : latest,
     historicalLatestSecondAt,
   );
-  const week = weeklyMetrics(now);
+  const week = weeklyMetrics(now, recent);
+  const averages = migrationAverages(now, recent);
 
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,
@@ -643,7 +669,8 @@ function buildReport({ complete }) {
     secondMigrationLast7d: second7dAddresses.size,
     latestSecondMigrationAt: latestSecondAt,
     uniqueMigrationRecipients: entries.length,
-    daily: dailySeries(14),
+    daily: dailySeries(14, recent),
+    migrationAverages: averages,
     weekly: {
       from: week.cutoff,
       to: new Date(now).toISOString(),

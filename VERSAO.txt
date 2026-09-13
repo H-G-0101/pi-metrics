@@ -1,4 +1,4 @@
-PI Metrics — version 18 (clear alternating wallet groups)
+PI Metrics — version 19 (1st and 2nd migration averages)
 Package date: 2026-09-13
 
 Inclui:
@@ -37,3 +37,6 @@ Inclui:
 - o workflow salva e restaura `checkpoint.json` junto com `checkpoint.json.parts`.
 - cada carteira e seus lockups agora compartilham a mesma tonalidade;
 - os grupos alternam entre fundo claro e escuro, com bordas laterais e separadores.
+- adiciona médias separadas da primeira e da segunda migração na visão geral;
+- soma todos os lockups do mesmo evento antes de calcular a média de 15 dias;
+- exclui eventos ainda não classificados da amostra e mostra seu tamanho.

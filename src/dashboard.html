@@ -249,6 +249,8 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
       <article class="stat green"><div class="stat-label">New 2nd migrations · 24h</div><div class="stat-value" id="second24h">—</div><div class="stat-sub">past 24 hours</div></article>
       <article class="stat green"><div class="stat-label">New 2nd migrations · 7 days</div><div class="stat-value" id="second7d">—</div><div class="stat-sub">rolling seven-day window</div></article>
       <article class="stat primary"><div class="stat-label">Pi distributed · 7 days</div><div class="stat-value" id="weeklyPi">—</div><div class="stat-sub">sum of all lockups</div></article>
+      <article class="stat blue"><div class="stat-label">Average 1st migration · 15 days</div><div class="stat-value" id="averageFirst">—</div><div class="stat-sub" id="averageFirstSub">all lockups combined per event</div></article>
+      <article class="stat primary"><div class="stat-label">Average 2nd migration · 15 days</div><div class="stat-value" id="averageSecond">—</div><div class="stat-sub" id="averageSecondSub">all lockups combined per event</div></article>
       <article class="stat"><div class="stat-label">Wallets receiving Pi · 7 days</div><div class="stat-value" id="weeklyWallets">—</div><div class="stat-sub">1st or 2nd migration</div></article>
       <article class="stat amber"><div class="stat-label">Only 1st migration detected</div><div class="stat-value" id="onlyFirst">—</div><div class="stat-sub">no second hash in the index</div></article>
       <article class="stat"><div class="stat-label">Claimable balances analyzed</div><div class="stat-value" id="claimableCount">—</div><div class="stat-sub">short- and long-term lockups</div></article>
@@ -494,6 +496,7 @@ async function loadMigration(){
     if(!stats)throw new Error('no data');
     const modern=Number(stats.schemaVersion||0)>=3;
     const weekly=stats.weekly||{};
+    const averages=stats.migrationAverages||{};
     const recent=stats.recentScan||{};
     const storage=stats.storage||{};
 
@@ -502,6 +505,14 @@ async function loadMigration(){
     $('second24h').textContent=modern?fmt(stats.secondMigrationLast24h):'—';
     $('second7d').textContent=modern?fmt(stats.secondMigrationLast7d):'—';
     $('weeklyPi').textContent=modern?fmtPi(weekly.totalPi,2)+' Pi':'—';
+    $('averageFirst').textContent=averages.first?.averagePi!=null?fmtPi(averages.first.averagePi,2)+' Pi':'—';
+    $('averageSecond').textContent=averages.second?.averagePi!=null?fmtPi(averages.second.averagePi,2)+' Pi':'—';
+    $('averageFirstSub').textContent=averages.first?.events
+      ? 'lockups combined · '+fmt(averages.first.events)+' classified events'
+      : 'no classified events in this window';
+    $('averageSecondSub').textContent=averages.second?.events
+      ? 'lockups combined · '+fmt(averages.second.events)+' classified events'
+      : 'no classified events in this window';
     $('weeklyWallets').textContent=modern?fmt(weekly.walletCount):'—';
     $('onlyFirst').textContent=fmt(stats.onlyFirst);
     $('claimableCount').textContent=modern?fmt(stats.claimableBalancesScanned):fmt(stats.totalPayments);
