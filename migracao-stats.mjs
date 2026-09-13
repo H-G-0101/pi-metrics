@@ -54,7 +54,7 @@ function emptyState() {
     claimableBalances: 0,
     byDest: {},
     recentEvents: {},
-    recentCreateAccountTxs: {},
+    recentCreatedAccountKeys: {},
     recentScan: null,
     lastSeenAt: null,
     d1Ready: false,
@@ -73,7 +73,8 @@ function loadState() {
     if (compatible) {
       checkpointLoaded = true;
       saved.recentEvents ||= {};
-      saved.recentCreateAccountTxs = {};
+      delete saved.recentCreateAccountTxs;
+      saved.recentCreatedAccountKeys = {};
       saved.recentScan ||= null;
       saved.d1Ready ||= false;
       saved.d1SeedOffset = Number(saved.d1SeedOffset || 0);
@@ -347,7 +348,7 @@ async function refreshRecentEvents() {
   let pages = 0;
 
   state.recentEvents = {};
-  state.recentCreateAccountTxs = {};
+  state.recentCreatedAccountKeys = {};
   state.recentScan = {
     complete: false,
     pages: 0,
@@ -371,8 +372,9 @@ async function refreshRecentEvents() {
         operation.type === 'create_account'
         && operation.source_account === WALLET
         && operation.transaction_hash
+        && operation.account
       ) {
-        state.recentCreateAccountTxs[operation.transaction_hash] = true;
+        state.recentCreatedAccountKeys[`${operation.transaction_hash}:${operation.account}`] = true;
       }
       addRecentOperation(state.recentEvents, operation);
     }
@@ -412,7 +414,7 @@ function saveCheckpoint() {
   // A janela recente é reconstruída no início de cada execução e não precisa
   // ser duplicada no checkpoint, que já contém o grande índice histórico.
   // Mantê-la somente em memória evita ultrapassar o limite de string do Node.
-  const checkpointState = { ...state, recentEvents: {}, recentCreateAccountTxs: {} };
+  const checkpointState = { ...state, recentEvents: {}, recentCreatedAccountKeys: {} };
   writeFileSync(temp, JSON.stringify(checkpointState));
   renameSync(temp, CK);
 }
@@ -425,7 +427,8 @@ function classifyRecentEvents() {
   return rows.map(event => {
     const entry = state.byDest[event.address];
     let migrationNumber = null;
-    if (state.recentCreateAccountTxs?.[event.transactionHash]) migrationNumber = 1;
+    const createdAccountKey = `${event.transactionHash}:${event.address}`;
+    if (state.recentCreatedAccountKeys?.[createdAccountKey]) migrationNumber = 1;
     else if (entry?.firstTx === event.transactionHash) migrationNumber = 1;
     else if (entry?.secondTx === event.transactionHash) migrationNumber = 2;
     else if (entry?.lastTx === event.transactionHash) migrationNumber = entry.eventCount;
@@ -577,7 +580,7 @@ function buildReport({ complete }) {
   const week = weeklyMetrics(now);
 
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,
@@ -611,7 +614,7 @@ function buildReport({ complete }) {
     detection: {
       rule: 'one recipient plus one distinct transaction_hash equals one migration event',
       sourceOperation: 'create_claimable_balance',
-      firstMigrationSignal: 'create_account in the same transaction',
+      firstMigrationSignal: 'create_account for the same recipient in the same transaction',
       recoveryWallet: RECOVERY_WALLET,
       timezone: 'UTC',
     },
