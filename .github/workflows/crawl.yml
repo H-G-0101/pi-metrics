@@ -1,4 +1,4 @@
-name: Crawl migração Pi
+name: Crawl Pi migrations
 
 on:
   workflow_dispatch:            # botão "Run workflow" na aba Actions
@@ -17,7 +17,7 @@ env:
 
 concurrency:
   group: crawl-migracao-pi
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   crawl:
@@ -33,25 +33,25 @@ jobs:
           node-version: "20"
 
       # restaura o checkpoint do run anterior (pra retomar de onde parou)
-      - name: Restaura checkpoint
+      - name: Restore checkpoint
         uses: actions/cache/restore@v4
         with:
           path: checkpoint.json
           key: pi-ckpt-${{ github.run_id }}
           restore-keys: pi-ckpt-
 
-      - name: Roda crawler
+      - name: Run crawler
         run: node migracao-stats.mjs
 
       # salva o checkpoint atualizado pro próximo run
-      - name: Salva checkpoint
+      - name: Save checkpoint
         if: always()
         uses: actions/cache/save@v4
         with:
           path: checkpoint.json
           key: pi-ckpt-${{ github.run_id }}
 
-      - name: Guarda o resultado
+      - name: Upload result
         if: always()
         uses: actions/upload-artifact@v4
         with:
