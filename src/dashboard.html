@@ -734,7 +734,8 @@ async function loadMigration(){
     $('classificationCoverage').textContent=!distributionReady?'Updating…':Number(classification.coveragePercent||0).toFixed(1)+'%';
     $('classificationCoverageSub').textContent=!distributionReady
       ? 'waiting for the updated crawler'
-      : fmt(classification.classifiedEvents||0)+' of '+fmt(classification.totalEvents||0)+' events classified';
+      : fmt(classification.classifiedEvents||0)+' of '+fmt(classification.totalEvents||0)+' events classified'
+        +(classification.sources?.inferred?' · '+fmt(classification.sources.inferred)+' inferred':'');
     $('secondEventShare').textContent=insightsReady?Number(insights.secondMigrationShare?.eventsPercent||0).toFixed(1)+'%':'Updating…';
     $('secondVolumeShare').textContent=insightsReady?Number(insights.secondMigrationShare?.volumePercent||0).toFixed(1)+'%':'Updating…';
     $('secondShareMeta').innerHTML=insightsReady

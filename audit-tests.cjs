@@ -10,7 +10,7 @@ source=source.slice(0,source.lastIndexOf('(async () => {'));
 source+='\n globalThis.api={classifyRecentEvents,record,addRecentOperation,saveCheckpoint,loadState,restoreFromD1,seedD1,syncD1Wallets,buildReport,getState:()=>state,setState:x=>state=x,setLoaded:x=>checkpointLoaded=x};';
 const calls=[];
 let respond=()=>({});
-const ctx={...fs,console,URL,AbortSignal,setTimeout,clearTimeout,process:{env:{CHECKPOINT_FILE:file,PUSH_URL:'https://test/stats',PUSH_TOKEN:'test'},on:()=>{}},fetch:async(url,options)=>{calls.push({url,body:options?.body?JSON.parse(options.body):null});return {ok:true,json:async()=>respond(url,options)};}};
+const ctx={...fs,console,URL,AbortSignal,setTimeout,clearTimeout,process:{env:{CHECKPOINT_FILE:file,PUSH_URL:'https://test/stats',PUSH_TOKEN:'test',INFER_SECOND:'0'},on:()=>{}},fetch:async(url,options)=>{calls.push({url,body:options?.body?JSON.parse(options.body):null});return {ok:true,json:async()=>respond(url,options)};}};
 vm.createContext(ctx);vm.runInContext(source,ctx);
 const api=ctx.api;
 (async()=>{
@@ -23,6 +23,26 @@ const api=ctx.api;
  api.record({...op,transaction_hash:'second'});assert.equal(state.byDest.B.eventCount,2);
  api.saveCheckpoint();const saved=JSON.parse(fs.readFileSync(file));assert.ok(saved.generation);
  assert.equal(api.loadState().byDest.B.eventCount,2,'checkpoint generation restore');
+ // Com INFER_SECOND, um hash desconhecido vira 2ª migração; o índice tem prioridade.
+ {
+  const f2=path.join(dir,'infer.json');
+  const c2={...fs,console,URL,AbortSignal,setTimeout,clearTimeout,process:{env:{CHECKPOINT_FILE:f2,PUSH_URL:'https://test/stats',PUSH_TOKEN:'test'},on:()=>{}},fetch:async()=>({ok:true,json:async()=>({})})};
+  vm.createContext(c2);vm.runInContext(source,c2);
+  const s2=c2.api.getState();
+  s2.recentEvents.x={address:'A',transactionHash:'unknown',createdAt:'2026-09-12',amountPi:10};
+  let row=c2.api.classifyRecentEvents()[0];
+  assert.equal(row.migrationNumber,2,'unknown hash inferred as second');
+  assert.equal(row.classifiedBy,'inferred');
+  s2.recentCreatedAccountKeys['unknown:A']=true;
+  row=c2.api.classifyRecentEvents()[0];
+  assert.equal(row.migrationNumber,1,'create_account wins over inference');
+  assert.equal(row.classifiedBy,'create_account');
+  delete s2.recentCreatedAccountKeys['unknown:A'];
+  s2.byDest.A={firstTx:'unknown',firstAt:'2022-01-01',eventCount:1};
+  row=c2.api.classifyRecentEvents()[0];
+  assert.equal(row.migrationNumber,1,'index wins over inference');
+  assert.equal(row.classifiedBy,'index');
+ }
  // A newer remote cursor must win over an existing local checkpoint.
  api.setLoaded(true);state.cursor='10';
  const meta={formatVersion:26,cursor:'20',pages:2,scannedRecords:200,claimableBalances:2,walletCount:1,wallet:state.wallet};
@@ -48,5 +68,5 @@ const api=ctx.api;
  assert.equal((await post({schemaVersion:13})).status,409);
  assert.equal((await post({schemaVersion:14,generatedAt:'2026-09-13T09:00:00Z'})).status,409);
  assert.equal((await post({schemaVersion:14})).status,400);
- console.log('PASS: classification gaps, grouping, checkpoint restore, newer D1, atomic page, frozen seed, failed restore isolation, corrections and stale report rejection');
+ console.log('PASS: classification gaps, inference priority, grouping, checkpoint restore, newer D1, atomic page, frozen seed, failed restore isolation, corrections and stale report rejection');
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>fs.rmSync(dir,{recursive:true,force:true}));

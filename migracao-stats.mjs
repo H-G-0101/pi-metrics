@@ -35,6 +35,10 @@ const MAX_PAGES = Math.max(0, Number(process.env.MAX_PAGES || 0));
 // Com SKIP_HISTORY, o cursor pula direto para o presente: só as migrações
 // daqui pra frente entram no índice. O passado não indexado é abandonado.
 const SKIP_HISTORY = /^(1|true|yes|sim)$/i.test(process.env.SKIP_HISTORY || '');
+// Sem create_account na transação, a conta já existia antes do evento: só pode
+// ser a 2ª migração. Usado apenas quando o índice não conhece o hash.
+// Ponha INFER_SECOND=0 para voltar a depender só do índice.
+const INFER_SECOND = !/^(0|false|no|nao|não)$/i.test(process.env.INFER_SECOND || '1');
 const PUSH_URL = process.env.PUSH_URL || '';
 const PUSH_TOKEN = process.env.PUSH_TOKEN || '';
 const WORKER_BASE = process.env.WORKER_BASE
@@ -566,13 +570,23 @@ function classifyRecentEvents() {
   return rows.map(event => {
     const entry = state.byDest[event.address];
     let migrationNumber = null;
+    let classifiedBy = null;
     const createdAccountKey = `${event.transactionHash}:${event.address}`;
-    if (state.recentCreatedAccountKeys?.[createdAccountKey]) migrationNumber = 1;
-    else if (entry?.firstTx === event.transactionHash) migrationNumber = 1;
-    else if (entry?.secondTx === event.transactionHash) migrationNumber = 2;
-    else if (entry?.lastTx === event.transactionHash) migrationNumber = entry.eventCount;
+    // Ordem: sinal on-chain direto > índice histórico > inferência.
+    if (state.recentCreatedAccountKeys?.[createdAccountKey]) {
+      migrationNumber = 1; classifiedBy = 'create_account';
+    } else if (entry?.firstTx === event.transactionHash) {
+      migrationNumber = 1; classifiedBy = 'index';
+    } else if (entry?.secondTx === event.transactionHash) {
+      migrationNumber = 2; classifiedBy = 'index';
+    } else if (entry?.lastTx === event.transactionHash) {
+      migrationNumber = entry.eventCount; classifiedBy = 'index';
+    } else if (INFER_SECOND) {
+      // A conta não nasceu nesta transação, logo já existia: 2ª migração.
+      migrationNumber = 2; classifiedBy = 'inferred';
+    }
 
-    return { ...event, migrationNumber };
+    return { ...event, migrationNumber, classifiedBy };
   });
 }
 
@@ -718,6 +732,13 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
     };
   };
   const classifiedEvents = first.events + second.events;
+  const sources = { createAccount: 0, index: 0, inferred: 0 };
+  for (const event of events) {
+    if (Date.parse(event.createdAt) < cutoff) continue;
+    if (event.classifiedBy === 'create_account') sources.createAccount++;
+    else if (event.classifiedBy === 'index') sources.index++;
+    else if (event.classifiedBy === 'inferred') sources.inferred++;
+  }
   return {
     days: Math.round(RECENT_RETENTION_MS / 86400000),
     from: new Date(cutoff).toISOString(),
@@ -729,6 +750,7 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
       classifiedEvents,
       pendingEvents: Math.max(0, totalEvents - classifiedEvents),
       coveragePercent: totalEvents ? +(classifiedEvents / totalEvents * 100).toFixed(2) : 0,
+      sources,
     },
   };
 }
@@ -910,6 +932,9 @@ function buildReport({ complete }) {
       rule: 'one recipient plus one distinct transaction_hash equals one migration event',
       sourceOperation: 'create_claimable_balance',
       firstMigrationSignal: 'create_account for the same recipient in the same transaction',
+      secondMigrationInference: INFER_SECOND
+        ? 'no create_account in the transaction means the account already existed, so the event is a second migration'
+        : 'disabled',
       recoveryWallet: RECOVERY_WALLET,
       timezone: 'UTC',
     },
