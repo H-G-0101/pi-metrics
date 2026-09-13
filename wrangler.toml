@@ -7,3 +7,7 @@ compatibility_date = "2025-01-01"
 [[kv_namespaces]]
 binding = "STATS"
 id = "ae3bc135dc1944d1aa17335ebf445853"
+[[d1_databases]]
+binding = "DB"
+database_name = "pi-migrations"
+database_id = "97830d3a-8c39-462b-96ba-6181e19eab91"
