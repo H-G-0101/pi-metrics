@@ -1,4 +1,4 @@
-PI Metrics — version 24 (protected lifetime totals)
+PI Metrics — version 25 (visual refinement and methodology)
 Package date: 2026-09-13
 
 Inclui:

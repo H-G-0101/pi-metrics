@@ -9,6 +9,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
+:root{color-scheme:dark}
+.section-nav{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px}.section-nav a{color:#cdd7ef;text-decoration:none;border:1px solid #34415d;border-radius:99px;padding:9px 16px;font-size:12px}.section-nav a:hover{background:#25304a}
+.lifetime-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.lifetime-grid .stat{padding:28px;min-height:175px}.lifetime-grid .stat-value{font-size:clamp(30px,5vw,54px)}
+.quality-note{padding:12px 16px;margin:16px 0;color:#f2c77a;border:1px solid #615030;border-radius:12px;background:#211d18;font-size:12px}.quality-note.ready{color:#69deb0;background:#12231e;border-color:#28543f}
+.metric-info{margin-top:10px;font-size:11px;color:#aab8d0}.metric-info summary{cursor:pointer;width:fit-content}.metric-info p{padding-top:7px;line-height:1.6}
+.health-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.health-grid div{padding:18px;background:#171e2f;border-radius:12px}.health-grid dt{font-size:11px;color:#9caecb}.health-grid dd{margin:9px 0 0;font-size:13px;overflow-wrap:anywhere}
+.mobile-wallets{display:none}.mobile-wallet{padding:18px;border-radius:14px;margin:12px 0;border:1px solid #34415d;background:#192237}.mobile-wallet:nth-child(even){background:#101724}.mobile-wallet summary{cursor:pointer;line-height:2}.mobile-wallet p{font-size:12px;margin-top:12px;overflow-wrap:anywhere}.mobile-wallet .tranche{white-space:normal;margin-top:8px}.mobile-wallet .tranches{display:block}
+@media(max-width:700px){.lifetime-grid,.health-grid{grid-template-columns:1fr}.mobile-wallets{display:block}.ranking-wrap:has(#rankingBody){display:none}.stat-value{font-size:25px!important}.lifetime-grid .stat-value{font-size:42px!important}}
 :root{
   --bg:#090b14;--panel:#111522;--panel2:#171c2c;--line:#252c40;
   --text:#f3f4f8;--muted:#8e97ad;--purple:#b36cff;--purple2:#7c3aed;
@@ -438,6 +446,64 @@ async function tick(){
   }catch(error){networkStatus(false)}
 }
 
+function setupRefinedLayout(){
+  const overview=$('firstTotal').closest('section');overview.id='recent';
+  const lifetime=document.createElement('section');lifetime.className='section';lifetime.id='lifetime';
+  lifetime.innerHTML='<div class="section-head"><div><div class="kicker">Cumulative wallet counts</div><h2>Lifetime migrations</h2><p>Historical totals · not limited to 15 days</p></div></div><div class="lifetime-grid"></div><p class="quality-note" id="qualityNote">Checking data coverage…</p>';
+  overview.before(lifetime);
+  for(const id of ['firstTotal','secondTotal'])lifetime.querySelector('.lifetime-grid').append($(id).closest('article'));
+  overview.querySelector('h2').textContent='Recent activity';
+  overview.querySelector('.section-head p').textContent='Rolling windows · each metric shows its own period';
+  const nav=document.createElement('nav');nav.className='section-nav';nav.setAttribute('aria-label','Dashboard sections');nav.innerHTML='<a href="#lifetime">Lifetime</a><a href="#recent">Recent activity</a><a href="#health">Data health</a><a href="/methodology">Methodology ↗</a>';
+  document.querySelector('header').after(nav);
+  for(const [id,text] of [
+    ['averageFirst','Total Pi divided by classified first migration events. Large migrations can raise the average. Lockups for the same wallet and hash are combined.'],
+    ['averageSecond','Total Pi divided by classified second migration events. Large migrations can raise the average. Lockups for the same wallet and hash are combined.'],
+    ['medianFirst','The middle value after sorting classified first migrations by Pi received. For an even sample, the two middle values are averaged.'],
+    ['medianSecond','The middle value after sorting classified second migrations by Pi received. It is less influenced by unusually large migrations.'],
+    ['firstTotal','Wallets with at least one detected migration. Wallets with a second migration are also included here. Preserved totals may exceed the currently rebuilt index.'],
+    ['secondTotal','Wallets with a detected second distinct migration transaction. This is a wallet count, not a count of lockups.']
+  ]){
+    const detail=document.createElement('details');detail.className='metric-info';detail.innerHTML='<summary aria-label="Explain this metric">ⓘ About this number</summary><p>'+text+'</p>';
+    $(id).closest('article').append(detail);
+  }
+  const health=document.createElement('section');health.id='health';health.className='section panel';health.innerHTML='<div class="section-head"><div><h2>Data health</h2><p>Reported by the crawler · not a live database probe</p></div></div><dl class="health-grid"><div><dt>D1 persistence</dt><dd id="healthStorage">—</dd></div><div><dt>Last report received</dt><dd id="healthReport">—</dd></div><div><dt>Historical index</dt><dd id="healthHistory">—</dd></div><div><dt>Recent window</dt><dd id="healthRecent">—</dd></div></dl><p class="panel-sub">A report can be published during a crawl. It does not mean the entire Action succeeded. Historical percentage is unavailable without a verified total to scan.</p>';
+  overview.before(health);
+  const mobile=document.createElement('div');mobile.id='mobileWallets';mobile.className='mobile-wallets';$('rankingBody').closest('.ranking-wrap').after(mobile);
+}
+function updateRefinedStatus(stats){
+  const partial=!stats.complete||stats.recentScan?.complete!==true;
+  $('qualityNote').className='quality-note'+(partial?'':' ready');
+  $('qualityNote').textContent=partial?'Partial data — historical indexing or the recent scan is still incomplete. Classified metrics may change.':'Scan complete as of the latest report.';
+  if(stats.lifetimeTotalsProtected)$('qualityNote').textContent+=' Lifetime counters may retain previously published higher values; these are not a substitute for the detailed index.';
+  $('healthStorage').textContent=stats.storage?.d1Ready?'Persistent at last report':stats.storage?.d1SeedInProgress?'Initial copy in progress':'Persistence not confirmed';
+  $('healthReport').textContent=stats.receivedAt||stats.generatedAt?new Date(stats.receivedAt||stats.generatedAt).toLocaleString('en-US'):'Unavailable';
+  $('healthHistory').textContent=stats.complete?'Synced at last report':fmt(stats.pagesScanned||0)+' pages scanned · syncing';
+  $('healthRecent').textContent=stats.recentScan?.complete?'15-day scan complete':fmt(stats.recentScan?.pages||0)+' pages · partial scan';
+}
+function compactCardNumbers(){
+  document.querySelectorAll('.stat-value,.largest-amount').forEach(el=>{
+    const raw=el.textContent;const match=raw.match(/^([\d,.]+)( Pi)?$/);if(!match)return;
+    const value=Number(match[1].replaceAll(',',''));el.title=raw;
+    if(value>=1000)el.textContent=new Intl.NumberFormat('en-US',{notation:'compact',minimumFractionDigits:2,maximumFractionDigits:2}).format(value)+(match[2]||'');
+    el.setAttribute('aria-label',raw);
+  });
+}
+function renderMobileWallets(rows){
+  const target=$('mobileWallets');if(!target)return;
+  const expanded=new Set([...target.querySelectorAll('details[open]')].map(d=>d.dataset.address));
+  target.replaceChildren();
+  for(const row of rows){
+    const detail=document.createElement('details');detail.className='mobile-wallet';detail.dataset.address=row.address;detail.open=expanded.has(row.address);
+    const summary=document.createElement('summary');summary.textContent='#'+row.rank+' · '+shortAddress(row.address)+' · '+fmtPi(row.amountPi,2)+' Pi · '+englishMigrationType(row.migrationType);detail.append(summary);
+    const address=document.createElement('p');address.textContent=row.address;detail.append(address);
+    const copy=document.createElement('button');copy.type='button';copy.className='mobile-copy';copy.textContent='Copy wallet';copy.dataset.address=row.address;copy.onclick=()=>copyWallet(copy);detail.append(copy);
+    const balance=document.createElement('p');balance.dataset.balance=row.address;balance.textContent='Available balance: loading…';detail.append(balance);
+    for(const tranche of row.tranches||[]){const p=document.createElement('p');p.textContent=fmtPi(tranche.amountPi,7)+' Pi · '+(tranche.lockSeconds==null?'Lock period unavailable':formatLock(tranche.lockSeconds))+(tranche.unlockAt?' · Unlock date: '+new Date(tranche.unlockAt).toLocaleDateString('en-US'):'');detail.append(p);}
+    target.append(detail);
+  }
+  if(!rows.length)target.textContent='Waiting for weekly data…';
+}
 function renderDaily(rows){
   const chart=$('dailyChart');
   if(!rows.length){chart.innerHTML='<div class="empty">daily history is not available yet</div>';return}
@@ -516,6 +582,7 @@ function renderLargest24h(largest){
 }
 
 function renderRanking(rows){
+  renderMobileWallets(rows);
   const body=$('rankingBody'),empty=$('rankingEmpty');
   if(!rows.length){body.innerHTML='';empty.style.display='block';return}
   empty.style.display='none';
@@ -588,7 +655,7 @@ async function loadRankingBalances(rows){
   for(const address of addresses){
     const cached=balanceCache.get(address);
     document.querySelectorAll('[data-balance="'+address+'"]').forEach(cell=>{
-      cell.textContent=cached&&cached.value!=null?fmtPi(cached.value,7)+' Pi':'unavailable';
+      cell.textContent=(cell.closest('.mobile-wallet')?'Account balance: ':'')+(cached&&cached.value!=null?fmtPi(cached.value,7)+' Pi':'unavailable');
       cell.classList.remove('loading');
     });
   }
@@ -604,8 +671,9 @@ async function copyWallet(button){
       document.body.appendChild(area);area.select();document.execCommand('copy');area.remove();
     }
     button.classList.add('copied');button.title='Copied!';button.setAttribute('aria-label','Wallet copied');
+    if(button.classList.contains('mobile-copy'))button.textContent='Copied!';
     clearTimeout(button._copyTimer);
-    button._copyTimer=setTimeout(()=>{button.classList.remove('copied');button.title='Copy wallet';button.setAttribute('aria-label','Copy wallet '+address)},1600);
+    button._copyTimer=setTimeout(()=>{button.classList.remove('copied');button.title='Copy wallet';button.setAttribute('aria-label','Copy wallet '+address);if(button.classList.contains('mobile-copy'))button.textContent='Copy wallet'},1600);
   }catch(error){button.title='Unable to copy';}
 }
 
@@ -623,6 +691,7 @@ async function loadMigration(){
     if(!response.ok)throw new Error('HTTP '+response.status);
     const stats=await response.json();
     if(!stats)throw new Error('no data');
+    updateRefinedStatus(stats);
     const modern=Number(stats.schemaVersion||0)>=3;
     const weekly=stats.weekly||{};
     const averages=stats.migrationAverages||{};
@@ -697,11 +766,14 @@ async function loadMigration(){
     renderSizeDistribution(insightsReady?insights.sizeDistribution:null);
     renderLargest24h(insightsReady?insights.largest24h:null);
     renderRanking(Array.isArray(stats.weeklyMigrationRanking)?stats.weeklyMigrationRanking:[]);
+    compactCardNumbers();
   }catch(error){
     $('indexChip').className='chip bad';$('indexChip').textContent='statistics unavailable';
     $('storageChip').className='chip bad';$('storageChip').textContent='D1 unavailable';
     $('syncLabel').className='chip bad';$('syncLabel').textContent='error';
     $('syncMeta').textContent='Unable to load /stats.';
+    $('qualityNote').textContent='Unable to refresh statistics. Previously displayed data may be stale.';
+    $('healthStorage').textContent='Status unavailable';
   }
 }
 
@@ -737,6 +809,7 @@ async function lookup(){
 
 $('lookBtn').addEventListener('click',lookup);
 $('addr').addEventListener('keydown',event=>{if(event.key==='Enter')lookup()});
+setupRefinedLayout();
 tick();loadMigration();loadSupply();
 setInterval(tick,CONFIG.POLL_MS);
 setInterval(loadMigration,CONFIG.MIGRATION_POLL_MS);

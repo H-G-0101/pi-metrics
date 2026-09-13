@@ -14,6 +14,7 @@ const b64 = f => readFileSync(join(here, f), 'utf8')  // lê UTF-8
 
 const DASH = Buffer.from(readFileSync(join(here, 'dashboard.html'))).toString('base64');
 const INSP = Buffer.from(readFileSync(join(here, 'inspetor.html'))).toString('base64');
+const METHOD = Buffer.from(readFileSync(join(here, 'methodology.html'))).toString('base64');
 
 const worker = `/**
  * Pi Mainnet — Worker único (sobe SÓ este arquivo no Cloudflare)
@@ -32,6 +33,7 @@ const worker = `/**
 const HORIZON = "https://api.mainnet.minepi.com";
 const DASH = "${DASH}";
 const INSP = "${INSP}";
+const METHOD = "${METHOD}";
 
 function cors(r){
   r.headers.set("Access-Control-Allow-Origin","*");
@@ -192,6 +194,7 @@ export default {
         try { previous = JSON.parse(await env.STATS.get("migracao") || "null"); }
         catch (error) {}
         preserveLifetimeTotals(incoming, previous);
+        incoming.receivedAt = new Date().toISOString();
         await env.STATS.put("migracao", JSON.stringify(incoming));
         return cors(new Response("ok"));
       }
@@ -205,6 +208,7 @@ export default {
     }
 
     if (p === "/inspetor") return html(INSP);
+    if (p === "/methodology") return html(METHOD);
     return html(DASH);
   }
 };
