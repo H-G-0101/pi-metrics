@@ -464,7 +464,15 @@ function setupRefinedLayout(){
     ['medianSecond','The middle value after sorting classified second migrations by Pi received. It is less influenced by unusually large migrations.'],
     ['classificationCoverage','Share of recent events backed by direct evidence: a create_account in the same transaction, a transaction hash already present in the historical index, or the recipient account creation date checked against Horizon. Any remaining events are counted as second migrations by inference. This share grows as the crawler verifies more accounts.'],
     ['firstTotal','Wallets with at least one detected migration. Wallets with a second migration are also included here. Preserved totals may exceed the currently rebuilt index.'],
-    ['secondTotal','Wallets with a detected second distinct migration transaction. This is a wallet count, not a count of lockups.']
+    ['secondTotal','Wallets with a detected second distinct migration transaction. This is a wallet count, not a count of lockups.'],
+    ['second24h','Wallets whose second migration was detected in the last 24 hours. A wallet is counted once, on the day its second migration was seen, not once per lockup.'],
+    ['second7d','Wallets whose second migration was detected in the last seven days. The window rolls continuously, so it is not a calendar week and it overlaps with the 24 hour card.'],
+    ['weeklyPi','Sum of every lockup created in the last seven days, first and second migrations together, including events still awaiting classification. Locked Pi is counted at creation time and is not necessarily claimable yet.'],
+    ['volumeFirst','Sum of Pi in events classified as first migrations over the last 15 days. Events awaiting classification are excluded, so this total can rise as classification improves.'],
+    ['volumeSecond','Sum of Pi in events classified as second migrations over the last 15 days. Most of these are classified by the account origin check rather than by the historical index.'],
+    ['weeklyWallets','Distinct wallets that received Pi in the last seven days through a first or second migration. A wallet receiving twice in the window is counted once.'],
+    ['onlyFirst','Wallets with a detected first migration and no second migration yet. It is the difference between the two lifetime counters, so it shrinks as second migrations are detected.'],
+    ['claimableCount','Total claimable balances examined by the crawler. One migration event usually creates two of them, a short and a long lockup, so this number is larger than the event count.']
   ]){
     const detail=document.createElement('details');detail.className='metric-info';detail.innerHTML='<summary aria-label="Explain this metric">ⓘ About this number</summary><p>'+text+'</p>';
     $(id).closest('article').append(detail);
