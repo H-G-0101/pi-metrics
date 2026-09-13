@@ -14,7 +14,7 @@
 .lifetime-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.lifetime-grid .stat{padding:28px;min-height:175px}.lifetime-grid .stat-value{font-size:clamp(30px,5vw,54px)}
 .quality-note{padding:12px 16px;margin:16px 0;color:#f2c77a;border:1px solid #615030;border-radius:12px;background:#211d18;font-size:12px}.quality-note.ready{color:#69deb0;background:#12231e;border-color:#28543f}
 .metric-info{margin-top:10px;font-size:11px;color:#aab8d0}.metric-info summary{cursor:pointer;width:fit-content}.metric-info p{padding-top:7px;line-height:1.6}
-.health-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.health-grid div{padding:18px;background:#171e2f;border-radius:12px}.health-grid dt{font-size:11px;color:#9caecb}.health-grid dd{margin:9px 0 0;font-size:13px;overflow-wrap:anywhere}
+.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.health-grid div{padding:18px;background:#171e2f;border-radius:12px}.health-grid dt{font-size:11px;color:#9caecb}.health-grid dd{margin:9px 0 0;font-size:13px;overflow-wrap:anywhere}
 .mobile-wallets{display:none}.mobile-wallet{padding:18px;border-radius:14px;margin:12px 0;border:1px solid #34415d;background:#192237}.mobile-wallet:nth-child(even){background:#101724}.mobile-wallet summary{cursor:pointer;line-height:2}.mobile-wallet p{font-size:12px;margin-top:12px;overflow-wrap:anywhere}.mobile-wallet .tranche{white-space:normal;margin-top:8px}.mobile-wallet .tranches{display:block}
 @media(max-width:700px){.lifetime-grid,.health-grid{grid-template-columns:1fr}.mobile-wallets{display:block}.ranking-wrap:has(#rankingBody){display:none}.stat-value{font-size:25px!important}.lifetime-grid .stat-value{font-size:42px!important}}
 :root{
@@ -250,6 +250,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
         <span>migration wallet: GABT…GC5G</span>
         <span>source: Horizon Mainnet</span>
         <span>rolling window: 7 days</span>
+        <span id="coverageMeta">index coverage: checking…</span>
       </div>
     </div>
     <aside class="sync-card">
@@ -467,7 +468,7 @@ function setupRefinedLayout(){
     const detail=document.createElement('details');detail.className='metric-info';detail.innerHTML='<summary aria-label="Explain this metric">ⓘ About this number</summary><p>'+text+'</p>';
     $(id).closest('article').append(detail);
   }
-  const health=document.createElement('section');health.id='health';health.className='section panel';health.innerHTML='<div class="section-head"><div><h2>Data health</h2><p>Reported by the crawler · not a live database probe</p></div></div><dl class="health-grid"><div><dt>D1 persistence</dt><dd id="healthStorage">—</dd></div><div><dt>Last report received</dt><dd id="healthReport">—</dd></div><div><dt>Historical index</dt><dd id="healthHistory">—</dd></div><div><dt>Recent window</dt><dd id="healthRecent">—</dd></div></dl><p class="panel-sub">A report can be published during a crawl. It does not mean the entire Action succeeded. Historical percentage is unavailable without a verified total to scan.</p>';
+  const health=document.createElement('section');health.id='health';health.className='section panel';health.innerHTML='<div class="section-head"><div><h2>Data health</h2><p>Reported by the crawler · not a live database probe</p></div></div><dl class="health-grid"><div><dt>D1 persistence</dt><dd id="healthStorage">—</dd></div><div><dt>Last report received</dt><dd id="healthReport">—</dd></div><div><dt>Historical index</dt><dd id="healthHistory">—</dd></div><div><dt>Recent window</dt><dd id="healthRecent">—</dd></div><div><dt>Index covers from</dt><dd id="healthCoverage">—</dd></div></dl><p class="panel-sub">A report can be published during a crawl. It does not mean the entire Action succeeded. Historical percentage is unavailable without a verified total to scan.</p>';
   overview.before(health);
   const mobile=document.createElement('div');mobile.id='mobileWallets';mobile.className='mobile-wallets';$('rankingBody').closest('.ranking-wrap').after(mobile);
 }
@@ -477,6 +478,9 @@ function updateRefinedStatus(stats){
   $('qualityNote').textContent=partial?'Partial data — historical indexing or the recent scan is still incomplete. Classified metrics may change.':'Scan complete as of the latest report.';
   if(stats.lifetimeTotalsProtected)$('qualityNote').textContent+=' Lifetime counters may retain previously published higher values; these are not a substitute for the detailed index.';
   $('healthStorage').textContent=stats.storage?.error?'Sync failed: '+stats.storage.error:stats.storage?.d1Ready?'Persistent at last report':stats.storage?.d1SeedInProgress?'Initial copy in progress':'Persistence not confirmed';
+  const coverage=stats.indexCoverageFrom?new Date(stats.indexCoverageFrom).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):null;
+  $('healthCoverage').textContent=coverage?'Migrations indexed from '+coverage:(stats.complete?'Full history':'Building · start date not set');
+  if($('coverageMeta'))$('coverageMeta').textContent=coverage?'data from '+coverage+' onward':'data coverage: full history';
   $('healthReport').textContent=stats.receivedAt||stats.generatedAt?new Date(stats.receivedAt||stats.generatedAt).toLocaleString('en-US'):'Unavailable';
   $('healthHistory').textContent=stats.complete?'Synced at last report':fmt(stats.pagesScanned||0)+' pages scanned · syncing';
   const scanAt=stats.recentScan?.startedAt;

@@ -32,6 +32,9 @@ const PUSH_EVERY_PAGES = Math.max(1, Number(process.env.PUSH_EVERY_PAGES || 250)
 const RECENT_PUSH_EVERY_PAGES = Math.max(1, Number(process.env.RECENT_PUSH_EVERY_PAGES || 25));
 const THROTTLE_MS = Math.max(0, Number(process.env.THROTTLE_MS || 40));
 const MAX_PAGES = Math.max(0, Number(process.env.MAX_PAGES || 0));
+// Com SKIP_HISTORY, o cursor pula direto para o presente: só as migrações
+// daqui pra frente entram no índice. O passado não indexado é abandonado.
+const SKIP_HISTORY = /^(1|true|yes|sim)$/i.test(process.env.SKIP_HISTORY || '');
 const PUSH_URL = process.env.PUSH_URL || '';
 const PUSH_TOKEN = process.env.PUSH_TOKEN || '';
 const WORKER_BASE = process.env.WORKER_BASE
@@ -71,6 +74,7 @@ function emptyState() {
     d1Ready: false,
     d1SeedOffset: 0,
     d1Budget: { day: '', rows: 0 },
+    coverageFrom: null,
   };
 }
 
@@ -103,6 +107,7 @@ function loadState() {
       saved.recentScan ||= null;
       saved.d1Ready ||= false;
       saved.d1SeedOffset = Number(saved.d1SeedOffset || 0);
+      saved.coverageFrom = saved.coverageFrom || null;
       saved.d1Budget = saved.d1Budget && typeof saved.d1Budget === 'object'
         ? { day: String(saved.d1Budget.day || ''), rows: Number(saved.d1Budget.rows || 0) }
         : { day: '', rows: 0 };
@@ -483,8 +488,25 @@ async function refreshRecentEvents() {
   );
 }
 
-function pruneRecentEvents(now = Date.now()) {
-  const cutoff = now - RECENT_RETENTION_MS;
+// Move o cursor histórico para a operação mais recente da carteira. É
+// idempotente: se um rebobinamento de cursor acontecer antes, este salto o
+// anula, então o crawl nunca volta ao passado com SKIP_HISTORY ligado.
+async function jumpToPresent() {
+  const page = await getPage('', 'desc');
+  const records = page._embedded?.records || [];
+  if (!records.length) return false;
+  const token = records[0].paging_token;
+  if (state.cursor && BigInt(state.cursor) >= BigInt(token)) return false;
+  console.log(`SKIP_HISTORY: cursor movido para o presente (${records[0].created_at}).`);
+  console.log('O histórico anterior não será indexado; só migrações novas entram daqui pra frente.');
+  state.cursor = token;
+  state.lastSeenAt = records[0].created_at;
+  // Marca de onde o índice passa a ser confiável (só no primeiro salto).
+  state.coverageFrom ||= records[0].created_at;
+  return true;
+}
+
+function pruneRecentEvents(now = Date.now()) {  const cutoff = now - RECENT_RETENTION_MS;
   for (const [key, event] of Object.entries(state.recentEvents)) {
     if (Date.parse(event.createdAt) < cutoff) delete state.recentEvents[key];
   }
@@ -853,6 +875,8 @@ function buildReport({ complete }) {
     generatedAt: new Date(now).toISOString(),
     complete,
     cursor: state.cursor,
+    indexCoverageFrom: state.coverageFrom,
+    skipHistory: SKIP_HISTORY,
     pagesScanned: state.pages,
     recordsScanned: state.scannedRecords,
     claimableBalancesScanned: state.claimableBalances,
@@ -969,6 +993,10 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   }
 
   let pagesThisRun = 0;
+  if (SKIP_HISTORY && await jumpToPresent()) {
+    saveCheckpoint();
+    if (d1Enabled && state.d1Ready) await syncD1Wallets([], d1Meta(false));
+  }
   let complete = false;
   while (!MAX_PAGES || pagesThisRun < MAX_PAGES) {
     if(Date.now()-Date.parse(state.recentScan?.completedAt||0)>15*60000){
