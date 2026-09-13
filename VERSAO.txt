@@ -1,4 +1,4 @@
-PI Metrics — version 25 (visual refinement and methodology)
+PI Metrics — version 26 (audited classification and persistence corrections)
 Package date: 2026-09-13
 
 Inclui:
@@ -14,7 +14,7 @@ Inclui:
 - participação da segunda migração por eventos e volume de Pi;
 - distribuição das migrações por faixa de valor;
 - maior primeira e segunda migração das últimas 24 horas, com botão de cópia;
-- proteção monotônica dos totais históricos de primeira e segunda migração no KV;
+- totais corrigíveis, sem manter máximos antigos incorretos;
 - ranking semanal das 20 carteiras que mais receberam Pi;
 - publicação parcial do progresso durante a indexação;
 - atualização automática do painel a cada 10 segundos.
@@ -26,7 +26,7 @@ Inclui:
 - o índice de carteiras e o cursor são copiados para o D1 em lotes;
 - se o cache do GitHub for perdido, o crawler restaura o progresso pelo D1.
 - os cartões de 2ª migração em 24 horas e 7 dias usam também a leitura recente;
-- uma execução nova do workflow cancela automaticamente a antiga.
+- execuções novas aguardam a anterior, sem cancelamento automático.
 - a cópia inicial para o D1 não pausa mais o avanço do índice histórico;
 - carteiras “em análise” passam a ser classificadas enquanto o D1 é preenchido.
 - o Top 20 semanal possui botão para copiar o endereço completo da carteira.

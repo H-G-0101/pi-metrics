@@ -60,25 +60,6 @@ function authorized(req, env){
   return req.headers.get("authorization") === "Bearer " + env.STATS_TOKEN;
 }
 
-function preserveLifetimeTotals(next, previous){
-  if (!next || !previous || next.wallet !== previous.wallet) return next;
-  const first = Math.max(
-    Number(next.firstMigrationsDetected || next.uniqueMigrationRecipients || 0),
-    Number(previous.firstMigrationsDetected || previous.uniqueMigrationRecipients || 0),
-  );
-  const second = Math.min(first, Math.max(
-    Number(next.receivedSecondMigration || 0),
-    Number(previous.receivedSecondMigration || 0),
-  ));
-  next.firstMigrationsDetected = first;
-  next.receivedSecondMigration = second;
-  next.onlyFirst = Math.max(0, first - second);
-  next.uniqueMigrationRecipients = Math.max(Number(next.uniqueMigrationRecipients || 0), first);
-  next.uniqueRecipients = Math.max(Number(next.uniqueRecipients || 0), first);
-  next.lifetimeTotalsProtected = true;
-  return next;
-}
-
 let schemaReady = false;
 async function ensureD1(env){
   if (schemaReady) return;
@@ -135,7 +116,8 @@ export default {
       try {
         await ensureD1(env);
         const body = await req.json();
-        const wallets = Array.isArray(body.wallets) ? body.wallets.slice(0, 40) : [];
+        const wallets = Array.isArray(body.wallets) ? body.wallets : [];
+        if(wallets.length>200)return json({error:"page too large"},400);
         const now = new Date().toISOString();
         const statements = wallets.map(row => env.DB.prepare(
           "INSERT INTO migration_wallets (address,first_tx,first_at,second_tx,second_at,event_count,updated_at,last_tx) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) " +
@@ -159,6 +141,10 @@ export default {
       if (!authorized(req, env)) return json({ error: "nao autorizado" }, 401);
       try {
         await ensureD1(env);
+        if(url.searchParams.get("metaOnly")){
+          const row=await env.DB.prepare("SELECT cursor FROM sync_state WHERE name='crawler'").first();
+          return json({protocol:26,meta:row?JSON.parse(row.cursor):null});
+        }
         const after = url.searchParams.get("after") || "";
         const [walletResult, metaResult] = await env.DB.batch([
           env.DB.prepare("SELECT address,first_tx,first_at,second_tx,second_at,event_count,last_tx FROM migration_wallets WHERE address > ?1 ORDER BY address LIMIT 501").bind(after),
@@ -193,7 +179,10 @@ export default {
         let previous = null;
         try { previous = JSON.parse(await env.STATS.get("migracao") || "null"); }
         catch (error) {}
-        preserveLifetimeTotals(incoming, previous);
+        if(!incoming || incoming.schemaVersion<14)return json({error:'Crawler update required: schema 14'},409);
+        if(!Number.isFinite(Date.parse(incoming.generatedAt)))return json({error:'Invalid report timestamp'},400);
+        if(previous?.schemaVersion>=14 && Date.parse(incoming.generatedAt)<Date.parse(previous.generatedAt))return json({error:'Older report rejected'},409);
+        incoming.lifetimeTotalsProtected=false;
         incoming.receivedAt = new Date().toISOString();
         await env.STATS.put("migracao", JSON.stringify(incoming));
         return cors(new Response("ok"));

@@ -16,6 +16,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -80,7 +81,7 @@ function loadState() {
         const byDest = {};
         const shardCount = Number(saved.shardCount || 0);
         for (let index = 0; index < shardCount; index++) {
-          const part = `${CK_PARTS}/part-${String(index).padStart(5, '0')}.json`;
+          const part = `${CK_PARTS}/${saved.generation ? saved.generation + "/" : ""}part-${String(index).padStart(5, '0')}.json`;
           if (!existsSync(part)) throw new Error(`parte ausente: ${part}`);
           for (const [address, entry] of JSON.parse(readFileSync(part, 'utf8'))) {
             byDest[address] = entry;
@@ -106,10 +107,13 @@ function loadState() {
 }
 
 let state = loadState();
+let d1Error = null;
 let d1Enabled = Boolean(D1_SYNC_URL && D1_RESTORE_URL && PUSH_TOKEN);
 
 function d1Meta(complete = false) {
   return {
+    formatVersion: 26,
+    wallet: WALLET,
     cursor: state.cursor,
     pages: state.pages,
     scannedRecords: state.scannedRecords,
@@ -135,6 +139,7 @@ function walletSnapshot(address) {
 async function callD1(path, options = {}) {
   const response = await fetch(path, {
     ...options,
+    signal: AbortSignal.timeout(30000),
     headers: {
       authorization: `Bearer ${PUSH_TOKEN}`,
       'content-type': 'application/json',
@@ -148,90 +153,66 @@ async function callD1(path, options = {}) {
 async function syncD1Wallets(wallets, meta = null) {
   if (!d1Enabled) return;
   const rows = wallets.filter(Boolean);
-  if (!rows.length) {
-    if (meta) await callD1(D1_SYNC_URL, { method: 'POST', body: JSON.stringify({ wallets: [], meta }) });
-    return;
-  }
-  for (let index = 0; index < rows.length; index += D1_BATCH_SIZE) {
-    const chunk = rows.slice(index, index + D1_BATCH_SIZE);
-    const isLast = index + D1_BATCH_SIZE >= rows.length;
-    await callD1(D1_SYNC_URL, {
-      method: 'POST',
-      body: JSON.stringify({ wallets: chunk, meta: isLast ? meta : null }),
-    });
-  }
+  // One historical page and its cursor must commit together.
+  if (rows.length > 200) throw new Error('D1 page exceeds 200 wallets');
+  await callD1(D1_SYNC_URL, {method:'POST', body:JSON.stringify({wallets:rows,meta})});
 }
 
 async function restoreFromD1() {
-  if (!d1Enabled || checkpointLoaded) return false;
+  state.d1Ready = false;
+  if (!d1Enabled) return false;
   try {
-    let after = '';
-    let restored = 0;
-    let meta = null;
+    const head = await callD1(D1_RESTORE_URL + '?metaOnly=1');
+    if(head.protocol!==26)throw new Error('Deploy the v26 Worker before running this crawler');
+    const meta = head.meta;
+    if (!meta || meta.rebuilding) {
+      if (!checkpointLoaded && meta?.rebuilding) throw new Error('D1 snapshot incomplete; restore the saved checkpoint before continuing');
+      state.d1SeedOffset=0;
+      return false;
+    }
+    if (meta.wallet && meta.wallet !== WALLET) throw new Error('D1 wallet mismatch');
+    if (checkpointLoaded && BigInt(state.cursor || '0') >= BigInt(meta.cursor || '0')) {
+      if(meta.formatVersion===26 && state.cursor===meta.cursor){state.d1Ready=true;return true;}
+      // Recopy a frozen local snapshot, including entries changed since an old seed.
+      state.d1SeedOffset=0;
+      return false;
+    }
+    let after=''; const restoredIndex={};
     do {
-      const url = `${D1_RESTORE_URL}?after=${encodeURIComponent(after)}`;
-      const data = await callD1(url);
-      meta ||= data.meta;
-      if (!meta) return false;
-      for (const row of data.wallets || []) {
-        state.byDest[row.address] = {
-          firstTx: row.firstTx,
-          firstAt: row.firstAt,
-          secondTx: row.secondTx,
-          secondAt: row.secondAt,
-          lastTx: row.lastTx,
-          eventCount: Number(row.eventCount || 1),
-        };
-        after = row.address;
-        restored++;
+      const data=await callD1(D1_RESTORE_URL+'?after='+encodeURIComponent(after));
+      if (JSON.stringify(data.meta)!==JSON.stringify(meta)) throw new Error('D1 changed during restore; retry next run');
+      for(const row of data.wallets || []) {
+        restoredIndex[row.address]={firstTx:row.firstTx,firstAt:row.firstAt,secondTx:row.secondTx,secondAt:row.secondAt,lastTx:row.lastTx,eventCount:Number(row.eventCount||1)};
+        after=row.address;
       }
-      if (!(data.wallets || []).length || !data.hasMore) break;
-    } while (true);
-
-    state.cursor = meta.cursor || '';
-    state.pages = Number(meta.pages || 0);
-    state.scannedRecords = Number(meta.scannedRecords || 0);
-    state.claimableBalances = Number(meta.claimableBalances || 0);
-    state.lastSeenAt = meta.lastSeenAt || null;
-    state.d1Ready = true;
-    state.d1SeedOffset = 0;
-    console.log(`Índice restaurado do D1: ${restored.toLocaleString('pt-BR')} carteiras.`);
-    return true;
-  } catch (error) {
-    console.log(`Aviso: restauração D1 indisponível (${error.message}).`);
-    d1Enabled = false;
-    return false;
+      if(!data.hasMore)break;
+      if(!(data.wallets||[]).length)throw new Error('Incomplete D1 pagination');
+    }while(true);
+    if(meta.walletCount != null && Object.keys(restoredIndex).length!==meta.walletCount)throw new Error('D1 wallet count mismatch');
+    state.byDest=restoredIndex;state.cursor=meta.cursor||'';state.pages=Number(meta.pages||0);
+    state.scannedRecords=Number(meta.scannedRecords||0);state.claimableBalances=Number(meta.claimableBalances||0);
+    state.lastSeenAt=meta.lastSeenAt||null;state.d1Ready=true;state.d1SeedOffset=0;
+    console.log('D1 snapshot restored and verified');return true;
+  }catch(error){
+    d1Error=error.message;d1Enabled=false;state.d1Ready=false;
+    // Never mix a partial restore with a fresh or older index.
+    throw error;
   }
 }
 
 async function seedD1() {
-  if (!d1Enabled || state.d1Ready) return true;
-  const addresses = Object.keys(state.byDest);
-  const start = Math.min(state.d1SeedOffset, addresses.length);
-  const selected = addresses.slice(start, start + D1_SEED_LIMIT);
+  if(!d1Enabled || state.d1Ready)return true;
+  const addresses=Object.keys(state.byDest);
   try {
-    for (let index = 0; index < selected.length; index += D1_BATCH_SIZE) {
-      const group = selected.slice(index, index + D1_BATCH_SIZE).map(walletSnapshot);
-      await syncD1Wallets(group);
-      state.d1SeedOffset = start + Math.min(index + D1_BATCH_SIZE, selected.length);
+    // The historical cursor is frozen until every entry has been copied.
+    await callD1(D1_SYNC_URL,{method:'POST',body:JSON.stringify({wallets:[],resetSnapshot:true,meta:{...d1Meta(false),rebuilding:true}})});
+    for(let index=0;index<addresses.length;index+=D1_BATCH_SIZE){
+      await syncD1Wallets(addresses.slice(index,index+D1_BATCH_SIZE).map(walletSnapshot));
     }
-    if (state.d1SeedOffset < addresses.length) {
-      console.log(
-        `D1 recebeu mais ${selected.length.toLocaleString('pt-BR')} carteiras; `
-        + 'a cópia continuará em paralelo na próxima execução.',
-      );
-      return false;
-    }
-    state.d1Ready = true;
-    state.d1SeedOffset = 0;
-    await syncD1Wallets([], d1Meta(false));
-    console.log('Cópia inicial do índice no D1 concluída ✓');
-    return true;
-  } catch (error) {
-    console.log(`Aviso: sincronização D1 indisponível (${error.message}).`);
-    d1Enabled = false;
-    return true;
-  }
+    await syncD1Wallets([],{...d1Meta(false),walletCount:addresses.length});
+    state.d1Ready=true;state.d1SeedOffset=0;d1Error=null;
+    console.log('D1 frozen snapshot committed');return true;
+  }catch(error){d1Error=error.message;state.d1Ready=false;d1Enabled=false;throw error;}
 }
 
 async function getPage(cursor, order = 'asc') {
@@ -239,7 +220,7 @@ async function getPage(cursor, order = 'asc') {
     + `?order=${order}&limit=${PAGE_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
 
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url, { headers: { Accept: 'application/json' } });
+    const response = await fetch(url, { signal: AbortSignal.timeout(30000), headers: { Accept: 'application/json' } });
     if (response.status === 429 || response.status >= 500) {
       const wait = Math.min(60000, 2000 * 2 ** attempt);
       console.log(`  ↳ Horizon ${response.status}; nova tentativa em ${wait / 1000}s…`);
@@ -372,6 +353,7 @@ async function refreshRecentEvents() {
     pages: 0,
     newestAt: null,
     oldestAt: null,
+    startedAt: new Date().toISOString(),
     cutoffAt: new Date(cutoff).toISOString(),
   };
   console.log('Atualizando primeiro a janela recente de 15 dias…');
@@ -413,6 +395,7 @@ async function refreshRecentEvents() {
   }
 
   state.recentScan.complete = true;
+  state.recentScan.completedAt = new Date().toISOString();
   console.log(
     `Janela recente pronta: ${Object.keys(state.recentEvents).length.toLocaleString('pt-BR')} eventos em `
     + `${pages.toLocaleString('pt-BR')} páginas.`,
@@ -429,11 +412,14 @@ function pruneRecentEvents(now = Date.now()) {
 function saveCheckpoint() {
   pruneRecentEvents();
   mkdirSync(CK_PARTS, { recursive: true });
+  const generation = `generation-${Date.now()}`;
+  const generationDir = `${CK_PARTS}/${generation}`;
+  mkdirSync(generationDir,{recursive:true});
   let shard = [];
   let shardCount = 0;
   const flushShard = () => {
     if (!shard.length) return;
-    const part = `${CK_PARTS}/part-${String(shardCount).padStart(5, '0')}.json`;
+    const part = `${generationDir}/part-${String(shardCount).padStart(5, '0')}.json`;
     const tempPart = `${part}.tmp`;
     writeFileSync(tempPart, JSON.stringify(shard));
     renameSync(tempPart, part);
@@ -456,12 +442,14 @@ function saveCheckpoint() {
     recentEvents: {},
     recentCreatedAccountKeys: {},
     sharded: true,
+    generation,
     shardCount,
   };
   writeFileSync(temp, JSON.stringify(checkpointState));
   renameSync(temp, CK);
 
   for (const filename of readdirSync(CK_PARTS)) {
+    if(/^generation-\d+$/.test(filename) && filename!==generation){rmSync(`${CK_PARTS}/${filename}`,{recursive:true,force:true});continue;}
     const match = /^part-(\d{5})\.json$/.exec(filename);
     if (match && Number(match[1]) >= shardCount) unlinkSync(`${CK_PARTS}/${filename}`);
   }
@@ -470,7 +458,7 @@ function saveCheckpoint() {
 function classifyRecentEvents() {
   const rows = Object.values(state.recentEvents)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const inferredByAddress = new Map();
+  
 
   return rows.map(event => {
     const entry = state.byDest[event.address];
@@ -480,11 +468,7 @@ function classifyRecentEvents() {
     else if (entry?.firstTx === event.transactionHash) migrationNumber = 1;
     else if (entry?.secondTx === event.transactionHash) migrationNumber = 2;
     else if (entry?.lastTx === event.transactionHash) migrationNumber = entry.eventCount;
-    else if (entry && state.lastSeenAt && event.createdAt > state.lastSeenAt) {
-      const offset = (inferredByAddress.get(event.address) || 0) + 1;
-      inferredByAddress.set(event.address, offset);
-      migrationNumber = entry.eventCount + offset;
-    }
+
     return { ...event, migrationNumber };
   });
 }
@@ -745,6 +729,8 @@ function buildReport({ complete }) {
   const destinationEntries = Object.entries(state.byDest);
   const entries = destinationEntries.map(([, entry]) => entry);
   const recent = classifyRecentEvents();
+  const firstAddresses=new Set(destinationEntries.map(([address])=>address));
+  for(const event of recent)if(event.migrationNumber===1)firstAddresses.add(event.address);
   const secondAddresses = new Set(
     destinationEntries.filter(([, entry]) => entry.secondTx).map(([address]) => address),
   );
@@ -781,7 +767,7 @@ function buildReport({ complete }) {
   const insights = migrationInsights(now, recent);
 
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,
@@ -789,9 +775,9 @@ function buildReport({ complete }) {
     pagesScanned: state.pages,
     recordsScanned: state.scannedRecords,
     claimableBalancesScanned: state.claimableBalances,
-    firstMigrationsDetected: entries.length,
+    firstMigrationsDetected: firstAddresses.size,
     receivedSecondMigration: receivedSecond,
-    onlyFirst: Math.max(0, entries.length - receivedSecond),
+    onlyFirst: Math.max(0, firstAddresses.size - receivedSecond),
     secondMigrationLast24h: second24hAddresses.size,
     secondMigrationLast7d: second7dAddresses.size,
     latestSecondMigrationAt: latestSecondAt,
@@ -811,7 +797,8 @@ function buildReport({ complete }) {
     weeklyMigrationRanking: week.ranking,
     recentScan: state.recentScan,
     storage: {
-      d1Ready: state.d1Ready === true,
+      d1Ready: d1Enabled && state.d1Ready === true,
+      error: d1Error,
       d1SeedInProgress: d1Enabled && state.d1Ready !== true,
     },
     detection: {
@@ -898,6 +885,9 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   let pagesThisRun = 0;
   let complete = false;
   while (!MAX_PAGES || pagesThisRun < MAX_PAGES) {
+    if(Date.now()-Date.parse(state.recentScan?.completedAt||0)>15*60000){
+      await refreshRecentEvents();await publishProgress(false);
+    }
     const page = await getPage(state.cursor);
     const records = page._embedded?.records || [];
     if (records.length === 0) {
@@ -921,6 +911,8 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
         state.d1Ready = false;
         state.d1SeedOffset = 0;
         d1Enabled = false;
+        d1Error = error.message;
+        throw error;
       }
     }
 
@@ -944,9 +936,9 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   if (d1Enabled && state.d1Ready) await syncD1Wallets([], d1Meta(complete));
   const stats = await publishProgress(complete);
   printSummary(stats);
-})().catch(error => {
+})().catch(async error => {
   console.error('ERRO:', error.message);
   saveCheckpoint();
-  writeReport({ complete: false });
+  await publishProgress(false);
   process.exit(1);
 });

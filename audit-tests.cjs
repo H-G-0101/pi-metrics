@@ -1,0 +1,52 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const vm=require('node:vm');
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pi-audit-'));
+const file=path.join(dir,'checkpoint.json');
+let source=fs.readFileSync(path.join(__dirname,'migracao-stats.mjs'),'utf8').replace(/^#!.*\n/,'').replace(/import \{[\s\S]*?\} from 'node:fs';/,'');
+source=source.slice(0,source.lastIndexOf('(async () => {'));
+source+='\n globalThis.api={classifyRecentEvents,record,addRecentOperation,saveCheckpoint,loadState,restoreFromD1,seedD1,syncD1Wallets,buildReport,getState:()=>state,setState:x=>state=x,setLoaded:x=>checkpointLoaded=x};';
+const calls=[];
+let respond=()=>({});
+const ctx={...fs,console,URL,AbortSignal,setTimeout,clearTimeout,process:{env:{CHECKPOINT_FILE:file,PUSH_URL:'https://test/stats',PUSH_TOKEN:'test'},on:()=>{}},fetch:async(url,options)=>{calls.push({url,body:options?.body?JSON.parse(options.body):null});return {ok:true,json:async()=>respond(url,options)};}};
+vm.createContext(ctx);vm.runInContext(source,ctx);
+const api=ctx.api;
+(async()=>{
+ const state=api.getState();
+ state.byDest.A={firstTx:'old',firstAt:'2022-01-01',eventCount:1};state.lastSeenAt='2023-01-01';state.recentEvents.x={address:'A',transactionHash:'third',createdAt:'2026-09-12',amountPi:10};
+ assert.equal(api.classifyRecentEvents()[0].migrationNumber,null,'gap must remain pending');
+ state.byDest.A.secondTx='third';assert.equal(api.classifyRecentEvents()[0].migrationNumber,2,'indexed second hash');
+ const op={type:'create_claimable_balance',source_account:state.wallet,claimants:[{destination:'B'}],transaction_hash:'first',created_at:'2022-01-01',amount:'10'};
+ api.record(op);api.record(op);assert.equal(state.byDest.B.eventCount,1);
+ api.record({...op,transaction_hash:'second'});assert.equal(state.byDest.B.eventCount,2);
+ api.saveCheckpoint();const saved=JSON.parse(fs.readFileSync(file));assert.ok(saved.generation);
+ assert.equal(api.loadState().byDest.B.eventCount,2,'checkpoint generation restore');
+ // A newer remote cursor must win over an existing local checkpoint.
+ api.setLoaded(true);state.cursor='10';
+ const meta={formatVersion:26,cursor:'20',pages:2,scannedRecords:200,claimableBalances:2,walletCount:1,wallet:state.wallet};
+ respond=url=>url.includes('metaOnly')?{protocol:26,meta}:{meta,hasMore:false,wallets:[{address:'C',firstTx:'c1',firstAt:'2022-01-01',eventCount:1}]};
+ await api.restoreFromD1();assert.equal(api.getState().cursor,'20');assert.equal(api.getState().byDest.C.firstTx,'c1');assert.equal(api.getState().byDest.A,undefined);
+ calls.length=0;respond=()=>({});
+ await api.syncD1Wallets(Array.from({length:100},(_,i)=>({address:String(i)})),{cursor:'21'});
+ assert.equal(calls.length,1,'one atomic request per page');assert.equal(calls[0].body.wallets.length,100);assert.equal(calls[0].body.meta.cursor,'21');
+ api.getState().d1Ready=false;calls.length=0;await api.seedD1();
+ assert.equal(calls[0].body.meta.rebuilding,true);assert.equal(calls.at(-1).body.meta.walletCount,1);assert.equal(api.getState().d1Ready,true);
+ // Partial restoration must leave the existing in-memory index untouched.
+ api.setLoaded(false);const before=api.getState().byDest;
+ respond=url=>url.includes('metaOnly')?{protocol:26,meta:{...meta,cursor:'30'}}:{meta:{...meta,cursor:'31'},wallets:[]};
+ await assert.rejects(api.restoreFromD1(),/changed during restore/);assert.equal(api.getState().byDest,before);
+ // Execute Worker against a fake KV: corrections accepted, old schemas rejected.
+ const worker=fs.readFileSync(path.join(__dirname,'worker.js'),'utf8').replace('export default {','globalThis.worker = {');
+ const wc={Response,Request,URL,Uint8Array,atob,console};vm.createContext(wc);vm.runInContext(worker,wc);
+ let value=JSON.stringify({schemaVersion:14,generatedAt:'2026-09-13T10:00:00Z',firstMigrationsDetected:1000,receivedSecondMigration:100});
+ const env={STATS_TOKEN:'test',STATS:{get:async()=>value,put:async(k,v)=>value=v}};
+ const post=body=>wc.worker.fetch(new Request('https://test/stats',{method:'POST',headers:{authorization:'Bearer test'},body:JSON.stringify(body)}),env);
+ assert.equal((await post({schemaVersion:14,generatedAt:'2026-09-13T11:00:00Z',firstMigrationsDetected:1000,receivedSecondMigration:80})).status,200);
+ assert.equal(JSON.parse(value).receivedSecondMigration,80);
+ assert.equal((await post({schemaVersion:13})).status,409);
+ assert.equal((await post({schemaVersion:14,generatedAt:'2026-09-13T09:00:00Z'})).status,409);
+ assert.equal((await post({schemaVersion:14})).status,400);
+ console.log('PASS: classification gaps, grouping, checkpoint restore, newer D1, atomic page, frozen seed, failed restore isolation, corrections and stale report rejection');
+})().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>fs.rmSync(dir,{recursive:true,force:true}));

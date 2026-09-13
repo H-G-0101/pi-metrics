@@ -476,10 +476,13 @@ function updateRefinedStatus(stats){
   $('qualityNote').className='quality-note'+(partial?'':' ready');
   $('qualityNote').textContent=partial?'Partial data — historical indexing or the recent scan is still incomplete. Classified metrics may change.':'Scan complete as of the latest report.';
   if(stats.lifetimeTotalsProtected)$('qualityNote').textContent+=' Lifetime counters may retain previously published higher values; these are not a substitute for the detailed index.';
-  $('healthStorage').textContent=stats.storage?.d1Ready?'Persistent at last report':stats.storage?.d1SeedInProgress?'Initial copy in progress':'Persistence not confirmed';
+  $('healthStorage').textContent=stats.storage?.error?'Sync failed: '+stats.storage.error:stats.storage?.d1Ready?'Persistent at last report':stats.storage?.d1SeedInProgress?'Initial copy in progress':'Persistence not confirmed';
   $('healthReport').textContent=stats.receivedAt||stats.generatedAt?new Date(stats.receivedAt||stats.generatedAt).toLocaleString('en-US'):'Unavailable';
   $('healthHistory').textContent=stats.complete?'Synced at last report':fmt(stats.pagesScanned||0)+' pages scanned · syncing';
-  $('healthRecent').textContent=stats.recentScan?.complete?'15-day scan complete':fmt(stats.recentScan?.pages||0)+' pages · partial scan';
+  const scanAt=stats.recentScan?.startedAt;
+  const age=scanAt?Math.max(0,Math.floor((Date.now()-Date.parse(scanAt))/60000)):null;
+  $('healthRecent').textContent=stats.recentScan?.complete?'Scan complete · '+(age==null?'collection time unavailable':age+' min since collection started'):fmt(stats.recentScan?.pages||0)+' pages · partial scan';
+  if(age==null || age>20){$('qualityNote').className='quality-note';$('qualityNote').textContent+=' Recent window freshness is not confirmed; report time is not collection time.';}
 }
 function compactCardNumbers(){
   document.querySelectorAll('.stat-value,.largest-amount').forEach(el=>{
