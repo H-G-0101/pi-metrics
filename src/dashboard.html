@@ -378,8 +378,8 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
   </section>
 
   <section class="lookup">
-    <h2>Look up a wallet</h2>
-    <p>Paste a public Mainnet address to check its balance and account information.</p>
+    <h2>Check a wallet migration</h2>
+    <p>Paste a public Mainnet address to see whether it received a first or second migration, and what is still locked.</p>
     <div class="input-row"><input id="addr" placeholder="GABC...XYZ" autocomplete="off" spellcheck="false"><button id="lookBtn">Look up</button></div>
     <div class="error" id="lookErr"></div><div class="result" id="lookResult"></div>
   </section>
@@ -789,17 +789,59 @@ async function lookup(){
   const address=$('addr').value.trim(),err=$('lookErr'),out=$('lookResult');
   err.classList.remove('show');out.classList.remove('show');
   if(!address){err.textContent='Paste an address first.';err.classList.add('show');return}
+  const wallet=$('originCopy')?.dataset.address||'';
   try{
-    const response=await fetch(CONFIG.HORIZON+'/accounts/'+encodeURIComponent(address));
-    if(response.status===404)throw new Error('Wallet not found on Mainnet.');
-    if(!response.ok)throw new Error('HTTP error '+response.status);
-    const account=await response.json();
+    const account=await fetchJson('/accounts/'+encodeURIComponent(address));
+    if(!account)throw new Error('Wallet not found on Mainnet.');
     const native=account.balances.find(b=>b.asset_type==='native')||{};
-    out.innerHTML='<div class="result-row"><span>available balance</span><b>'+fmtPi(native.balance,7)+' Pi</b></div>'+
-      '<div class="result-row"><span>sequence</span><b>'+fmt(account.sequence)+'</b></div>'+
-      '<div class="result-row"><span>subentries</span><b>'+fmt(account.subentry_count)+'</b></div>';
-    out.classList.add('show');
+
+    // Operações da conta: identificam criação e cada transação de migração.
+    const ops=(await fetchJson('/accounts/'+encodeURIComponent(address)+'/operations?order=asc&limit=200'))
+      ?._embedded?.records||[];
+    const birth=ops[0];
+    const createdByMigration=birth?.type==='create_account'&&(!wallet||birth.source_account===wallet);
+    const migrationTx=new Set();
+    for(const op of ops){
+      if(op.type!=='create_claimable_balance')continue;
+      if(wallet&&op.source_account!==wallet)continue;
+      if(op.transaction_hash)migrationTx.add(op.transaction_hash);
+    }
+    const rounds=migrationTx.size;
+
+    // Lockups ainda não resgatados.
+    const balances=(await fetchJson('/claimable_balances?claimant='+encodeURIComponent(address)+'&limit=50'))
+      ?._embedded?.records||[];
+    const lockedPi=balances.reduce((sum,row)=>sum+Number(row.amount||0),0);
+
+    const status=rounds>=2?'2nd migration received'
+      :rounds===1?(createdByMigration?'1st migration only':'one migration event found')
+      :ops.length?'no migration event in the last 200 operations':'no operations found';
+
+    let html='<div class="result-row"><span>migration status</span><b>'+status+'</b></div>'
+      +'<div class="result-row"><span>migration events</span><b>'+fmt(rounds)+'</b></div>'
+      +'<div class="result-row"><span>account created</span><b>'
+        +(birth?.created_at?new Date(birth.created_at).toLocaleDateString('en-US')
+          +(createdByMigration?' · by the migration wallet':''):'—')+'</b></div>'
+      +'<div class="result-row"><span>available balance</span><b>'+fmtPi(native.balance,7)+' Pi</b></div>'
+      +'<div class="result-row"><span>still locked</span><b>'+fmtPi(lockedPi,7)+' Pi · '+fmt(balances.length)+' lockups</b></div>';
+
+    for(const row of balances.slice(0,10)){
+      const claimant=(row.claimants||[]).find(c=>c.destination===address);
+      const unlock=claimant?.predicate?.not?.abs_before||claimant?.predicate?.abs_before;
+      html+='<div class="result-row"><span>lockup</span><b>'+fmtPi(row.amount,7)+' Pi'
+        +(unlock?' · unlocks '+new Date(unlock).toLocaleDateString('en-US'):'')+'</b></div>';
+    }
+    if(balances.length>10)html+='<div class="result-row"><span>…</span><b>'+fmt(balances.length-10)+' more lockups</b></div>';
+
+    out.innerHTML=html;out.classList.add('show');
   }catch(error){err.textContent=error.message;err.classList.add('show')}
+}
+
+async function fetchJson(path){
+  const response=await fetch(CONFIG.HORIZON+path,{cache:'no-store',headers:{Accept:'application/json'}});
+  if(response.status===404)return null;
+  if(!response.ok)throw new Error('HTTP error '+response.status);
+  return response.json();
 }
 
 $('lookBtn').addEventListener('click',lookup);
