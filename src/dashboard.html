@@ -10,6 +10,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
 :root{color-scheme:dark}
+.origin{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin:0 0 16px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,rgba(139,92,246,.10),rgba(139,92,246,.02))}
+.origin .l{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.origin .addr{font-family:var(--mono);font-size:13px;word-break:break-all;color:var(--text)}
+.origin .when{font-family:var(--mono);font-size:13px;color:var(--purple)}
+.origin .sep{width:1px;height:26px;background:var(--line)}
 .section-nav{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px}.section-nav a{color:#cdd7ef;text-decoration:none;border:1px solid #34415d;border-radius:99px;padding:9px 16px;font-size:12px}.section-nav a:hover{background:#25304a}
 .lifetime-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.lifetime-grid .stat{padding:28px;min-height:175px}.lifetime-grid .stat-value{font-size:clamp(30px,5vw,54px)}
 .quality-note{padding:12px 16px;margin:16px 0;color:#f2c77a;border:1px solid #615030;border-radius:12px;background:#211d18;font-size:12px}.quality-note.ready{color:#69deb0;background:#12231e;border-color:#28543f}
@@ -409,6 +414,13 @@ function setupRefinedLayout(){
   for(const id of ['firstTotal','secondTotal'])lifetime.querySelector('.lifetime-grid').append($(id).closest('article'));
   overview.querySelector('h2').textContent='Recent activity';
   overview.querySelector('.section-head p').textContent='Rolling windows · each metric shows its own period';
+  const origin=document.createElement('div');origin.className='origin';
+  origin.innerHTML='<div><div class="l">Migration wallet</div><div class="addr" id="originWallet">—</div></div>'
+    +'<div class="sep" aria-hidden="true"></div>'
+    +'<div><div class="l">Last wallet migrated</div><div class="when" id="originLast">—</div></div>'
+    +'<button class="copy-btn" id="originCopy" type="button" title="Copy wallet" aria-label="Copy migration wallet"></button>';
+  overview.querySelector('.section-head').after(origin);
+  $('originCopy').addEventListener('click',event=>copyWallet(event.currentTarget));
   const nav=document.createElement('nav');nav.className='section-nav';nav.setAttribute('aria-label','Dashboard sections');nav.innerHTML='<a href="#lifetime">Lifetime</a><a href="#recent">Recent activity</a><a href="#health">Data health</a><a href="/methodology">Methodology ↗</a>';
   document.querySelector('header').after(nav);
   for(const [id,text] of [
@@ -710,6 +722,14 @@ async function loadMigration(){
     $('onlyFirst').textContent=fmt(stats.onlyFirst);
     $('claimableCount').textContent=modern?fmt(stats.claimableBalancesScanned):fmt(stats.totalPayments);
     $('indexedWallets').textContent=fmt(stats.uniqueMigrationRecipients!=null?stats.uniqueMigrationRecipients:stats.uniqueRecipients);
+    if(stats.wallet){
+      $('originWallet').textContent=stats.wallet;
+      $('originCopy').dataset.address=stats.wallet;
+    }
+    const lastMigration=stats.lastMigrationAt||recent.newestAt;
+    $('originLast').textContent=lastMigration
+      ? new Date(lastMigration).toLocaleString('en-US')+' · '+ago(lastMigration)+' ago'
+      : 'no migration seen in the window';
     $('migStamp').textContent=stats.generatedAt?'updated '+new Date(stats.generatedAt).toLocaleString('en-US'):'time unavailable';
     $('weeklyFirst').textContent=modern?fmt(weekly.firstMigrationEvents):'—';
     $('weeklySecond').textContent=modern?fmt(weekly.secondMigrationEvents):'—';

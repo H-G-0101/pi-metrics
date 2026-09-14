@@ -996,6 +996,12 @@ function buildReport({ complete }) {
     generatedAt: new Date(now).toISOString(),
     complete,
     cursor: state.cursor,
+    // Última vez que a carteira de migração de fato migrou alguém.
+    lastMigrationAt: Object.values(state.recentEvents)
+      .map(event => event.createdAt)
+      .filter(Boolean)
+      .sort()
+      .at(-1) || null,
     indexCoverageFrom: state.coverageFrom,
     skipHistory: SKIP_HISTORY,
     pagesScanned: state.pages,
