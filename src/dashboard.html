@@ -173,8 +173,6 @@ tbody tr:last-child td{border-bottom:0}
 .network-card .n{font:600 19px var(--mono);margin-top:7px}
 .network-card .l{color:var(--muted);font-size:10px}
 .network-card .s{color:var(--muted);font:500 9px var(--mono);margin-top:5px}
-.pulse{height:42px;display:flex;align-items:flex-end;gap:3px;padding:6px 0;margin-top:9px}
-.pulse i{flex:1;max-width:4px;background:var(--purple2);border-radius:2px;transition:.3s}
 
 .supply{margin-top:14px}
 .supply[hidden]{display:none}
@@ -369,18 +367,6 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
     </div>
   </section>
 
-  <section class="section">
-    <div class="section-head"><div><h2>Pi Mainnet network</h2><p>Live indicators from the latest ledger.</p></div><div class="updated">updates every 6 seconds</div></div>
-    <div class="network-grid">
-      <article class="network-card"><div class="l">Ledger height</div><div class="n" id="height">—</div><div class="s" id="heightSub">latest ledger</div></article>
-      <article class="network-card"><div class="l">Latest close</div><div class="n" id="age">—</div><div class="s">time since ledger</div></article>
-      <article class="network-card"><div class="l">Transactions</div><div class="n" id="tx">—</div><div class="s" id="ops">— operations</div></article>
-      <article class="network-card"><div class="l">Throughput</div><div class="n" id="tps">—</div><div class="s">tx/s · 10 ledgers</div></article>
-      <article class="network-card"><div class="l">Base fee</div><div class="n" id="fee">—</div><div class="s">stroops/operation</div></article>
-      <article class="network-card"><div class="l">Protocol</div><div class="n" id="proto">—</div><div class="s">core version</div></article>
-    </div>
-    <div class="pulse" id="bars"></div>
-  </section>
 
   <section class="panel supply" id="supplySection" hidden>
     <div class="panel-title">Migrated supply</div><div id="supplyBody"></div>
@@ -393,58 +379,26 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
     <div class="error" id="lookErr"></div><div class="result" id="lookResult"></div>
   </section>
 
-  <footer><span>Pi Migration Monitor</span><span id="footerEndpoint">Horizon Pi Mainnet</span><span>public on-chain data</span></footer>
+  <footer><span>Pi Migration Monitor</span><span id="footerEndpoint">migration data only</span><span>public on-chain data</span></footer>
 </main>
 
 <script>
-const CONFIG={HORIZON:'/horizon',MIGRATION_URL:'/stats',SUPPLY_URL:'',POLL_MS:6000,MIGRATION_POLL_MS:10000};
+const CONFIG={HORIZON:'/horizon',MIGRATION_URL:'/stats',SUPPLY_URL:'',MIGRATION_POLL_MS:10000};
 const $=id=>document.getElementById(id);
 const fmt=n=>n==null?'—':Number(n).toLocaleString('en-US');
 const fmtPi=(n,digits=2)=>n==null?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:digits});
 const shortAddress=a=>a&&a.length>16?a.slice(0,8)+'…'+a.slice(-6):a||'—';
 const balanceCache=new Map();
 const BALANCE_TTL=5*60*1000;
-let lastHeight=null;
-let barVals=Array(42).fill(.15);
-
-(function(){const b=$('bars');for(let i=0;i<42;i++){const el=document.createElement('i');el.style.height='15%';b.appendChild(el)}})();
-
 function networkStatus(ok){
   const chip=$('networkChip');chip.className='chip '+(ok?'good':'bad');
-  $('statusText').textContent=ok?'network online':'offline';
-}
-function pushBar(value){
-  barVals.push(Math.max(.08,Math.min(1,value)));barVals.shift();
-  [...$('bars').children].forEach((el,i)=>{el.style.height=(barVals[i]*100)+'%';el.style.background=barVals[i]>.55?'var(--purple)':'var(--purple2)'});
+  $('statusText').textContent=ok?'data online':'offline';
 }
 function ago(iso){
   const s=Math.max(0,(Date.now()-Date.parse(iso))/1000);
   if(s<60)return Math.floor(s)+'s';
   if(s<3600)return Math.floor(s/60)+'min';
   return Math.floor(s/3600)+'h';
-}
-
-async function tick(){
-  try{
-    const response=await fetch(CONFIG.HORIZON+'/ledgers?order=desc&limit=10',{headers:{Accept:'application/json'}});
-    if(!response.ok)throw new Error('HTTP '+response.status);
-    const records=(await response.json())._embedded.records;
-    const current=records[0],oldest=records[records.length-1];
-    const seconds=(Date.parse(current.closed_at)-Date.parse(oldest.closed_at))/1000||1;
-    const totalTx=records.reduce((sum,row)=>sum+Number(row.successful_transaction_count||0),0);
-    networkStatus(true);
-    const height=Number(current.sequence);
-    if(height!==lastHeight){pushBar(Number(current.successful_transaction_count||0)/8+.12);lastHeight=height}
-    $('height').textContent=fmt(height);
-    $('heightSub').textContent='closed at '+new Date(current.closed_at).toLocaleTimeString('en-US');
-    $('age').textContent=ago(current.closed_at);
-    $('tx').textContent=fmt(current.successful_transaction_count);
-    $('ops').textContent=fmt(current.operation_count)+' operations';
-    $('tps').textContent=(totalTx/seconds).toFixed(2);
-    $('fee').textContent=fmt(current.base_fee_in_stroops);
-    $('proto').textContent='v'+current.protocol_version;
-    $('footerEndpoint').textContent='endpoint: '+new URL(CONFIG.HORIZON,location.href).host;
-  }catch(error){networkStatus(false)}
 }
 
 function setupRefinedLayout(){
@@ -786,6 +740,7 @@ async function loadMigration(){
     renderLargest24h(insightsReady?insights.largest24h:null);
     renderRanking(Array.isArray(stats.weeklyMigrationRanking)?stats.weeklyMigrationRanking:[]);
     compactCardNumbers();
+    networkStatus(true);
   }catch(error){
     $('indexChip').className='chip bad';$('indexChip').textContent='statistics unavailable';
     $('storageChip').className='chip bad';$('storageChip').textContent='D1 unavailable';
@@ -793,6 +748,7 @@ async function loadMigration(){
     $('syncMeta').textContent='Unable to load /stats.';
     $('qualityNote').textContent='Unable to refresh statistics. Previously displayed data may be stale.';
     $('healthStorage').textContent='Status unavailable';
+    networkStatus(false);
   }
 }
 
@@ -829,8 +785,7 @@ async function lookup(){
 $('lookBtn').addEventListener('click',lookup);
 $('addr').addEventListener('keydown',event=>{if(event.key==='Enter')lookup()});
 setupRefinedLayout();
-tick();loadMigration();loadSupply();
-setInterval(tick,CONFIG.POLL_MS);
+loadMigration();loadSupply();
 setInterval(loadMigration,CONFIG.MIGRATION_POLL_MS);
 </script>
 </body>
