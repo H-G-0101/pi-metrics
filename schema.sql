@@ -30,3 +30,14 @@ CREATE TABLE IF NOT EXISTS sync_state (
   cursor TEXT,
   updated_at TEXT
 );
+-- v28: permanent operations; group by address and transaction_hash for events.
+CREATE TABLE IF NOT EXISTS migration_operations (
+  operation_id TEXT PRIMARY KEY,
+  address TEXT NOT NULL,
+  transaction_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  predicate_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS migration_operations_event
+  ON migration_operations(address, transaction_hash);

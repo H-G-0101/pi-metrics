@@ -7,7 +7,7 @@ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pi-audit-'));
 const file=path.join(dir,'checkpoint.json');
 let source=fs.readFileSync(path.join(__dirname,'migracao-stats.mjs'),'utf8').replace(/^#!.*\n/,'').replace(/import \{[\s\S]*?\} from 'node:fs';/,'');
 source=source.slice(0,source.lastIndexOf('(async () => {'));
-source+='\n globalThis.api={classifyRecentEvents,record,addRecentOperation,saveCheckpoint,loadState,restoreFromD1,seedD1,syncD1Wallets,buildReport,getState:()=>state,setState:x=>state=x,setLoaded:x=>checkpointLoaded=x};';
+source+='\n globalThis.api={verifyTopWallets,ledgerOperations,classifyRecentEvents,record,addRecentOperation,saveCheckpoint,loadState,restoreFromD1,seedD1,syncD1Wallets,buildReport,getState:()=>state,setState:x=>state=x,setLoaded:x=>checkpointLoaded=x};';
 const calls=[];
 let respond=()=>({});
 const ctx={...fs,console,URL,AbortSignal,setTimeout,clearTimeout,process:{env:{CHECKPOINT_FILE:file,PUSH_URL:'https://test/stats',PUSH_TOKEN:'test',INFER_SECOND:'0'},on:()=>{}},fetch:async(url,options)=>{calls.push({url,body:options?.body?JSON.parse(options.body):null});return {ok:true,json:async()=>respond(url,options)};}};
@@ -99,5 +99,24 @@ const api=ctx.api;
    assert.equal(qs.d1SeedOffset,initialOffset,'quota preserves last committed offset');
    assert.equal(qs.d1Ready,false,'quota cannot mark snapshot ready');
  }
- console.log('PASS: pending evidence, lifetime expiry, grouping, checkpoint restore, cursor integrity, measured writes, atomic page, seed quota handling, corrections and stale report rejection');
+ {
+  const requests=[];let history=[];
+  const hc={...fs,console,URL,AbortSignal,setTimeout,clearTimeout,process:{env:{CHECKPOINT_FILE:path.join(dir,'history.json'),PUSH_URL:'https://test/stats',PUSH_TOKEN:'test',THROTTLE_MS:'0'},on:()=>{}},fetch:async(url,options)=>{
+   requests.push({url,body:options?.body?JSON.parse(options.body):null});
+   return {ok:true,json:async()=>String(url).includes('/accounts/')?{_embedded:{records:String(url).includes('cursor=')?[]:history}}:String(url).includes('/d1/evidence')?{evidence:null}:{ledgerProtocol:28,rowsWritten:3}};
+  }};
+  vm.createContext(hc);vm.runInContext(source,hc);const hs=hc.api.getState();const now=new Date().toISOString();
+  const base={type:'create_claimable_balance',source_account:hs.wallet,asset:'native',claimants:[{destination:'TARGET',predicate:{unconditional:true}}],amount:'10',created_at:now};
+  history=[{type:'create_account',account:'TARGET',paging_token:'1'},...['a','a','b','b','c'].map((hash,i)=>({...base,transaction_hash:hash,id:String(i+2),paging_token:String(i+2)}))];
+  hs.recentEvents.x={address:'TARGET',transactionHash:'c',createdAt:now,amountPi:10,balanceCount:1,tranches:[]};
+  hs.byDest.TARGET={firstTx:'c',eventCount:1}; // deliberately wrong legacy ordinal
+  await hc.api.verifyTopWallets();
+  assert.equal(hc.api.classifyRecentEvents()[0].migrationNumber,3,'full wallet history corrects a wrong legacy ordinal');
+  assert.equal(hc.api.classifyRecentEvents()[0].evidence.previous.hash,'b');
+  assert.equal(hs.walletEvidence.TARGET.events.length,3,'two lockups in one hash remain one migration');
+  const committed=requests.find(r=>r.body?.verification);assert.equal(committed.body.operations.length,5);assert.ok(committed.body.verification.evidence.complete);
+  await hc.api.verifyTopWallets();assert.ok(requests.some(r=>String(r.url).includes('cursor=6')),'resume at saved history cursor');
+  assert.equal(hc.api.ledgerOperations([{...history[1],asset:'USD:issuer'}]).length,0,'ignore nonnative assets');
+ }
+ console.log('PASS: classification, lifetime, D1 recovery and quota, paginated wallet history, incremental resume, evidence, third migration and native asset filter');
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>fs.rmSync(dir,{recursive:true,force:true}));

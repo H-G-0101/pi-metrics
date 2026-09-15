@@ -69,6 +69,8 @@ async function ensureD1(env){
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_wallets_second_at ON migration_wallets(second_at)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS recent_migrations (address TEXT NOT NULL, transaction_hash TEXT NOT NULL, created_at TEXT NOT NULL, amount_pi REAL NOT NULL DEFAULT 0, balance_count INTEGER NOT NULL DEFAULT 1, migration_number INTEGER, PRIMARY KEY(address, transaction_hash))"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sync_state (name TEXT PRIMARY KEY, cursor TEXT, updated_at TEXT)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS migration_operations (operation_id TEXT PRIMARY KEY, address TEXT NOT NULL, transaction_hash TEXT NOT NULL, created_at TEXT NOT NULL, amount TEXT NOT NULL, predicate_json TEXT NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS migration_operations_event ON migration_operations(address,transaction_hash)"),
   ]);
   try {
     await env.DB.prepare("ALTER TABLE migration_wallets ADD COLUMN last_tx TEXT").run();
@@ -110,6 +112,14 @@ export default {
         headers: { "content-type": "application/json" } }));
     }
 
+    if (p === "/d1/evidence") {
+      if (!authorized(req,env)) return json({error:'Unauthorized'},401);
+      try {
+        await ensureD1(env);
+        const row=await env.DB.prepare("SELECT cursor FROM sync_state WHERE name=?1").bind('evidence:'+url.searchParams.get('address')).first();
+        return json({evidence:row?JSON.parse(row.cursor):null});
+      }catch(error){return json({error:error.message},500);}
+    }
     if (p === "/d1/sync") {
       if (req.method !== "POST") return json({ error: "metodo nao permitido" }, 405);
       if (!authorized(req, env)) return json({ error: "nao autorizado" }, 401);
@@ -117,6 +127,8 @@ export default {
         await ensureD1(env);
         const body = await req.json();
         const wallets = Array.isArray(body.wallets) ? body.wallets : [];
+        const operations = Array.isArray(body.operations) ? body.operations : [];
+        if (operations.length>200) return json({error:'too many operations'},400);
         if(wallets.length>200)return json({error:"page too large"},400);
         const now = new Date().toISOString();
         const statements = wallets.map(row => env.DB.prepare(
@@ -124,6 +136,13 @@ export default {
           "ON CONFLICT(address) DO UPDATE SET first_tx=excluded.first_tx,first_at=excluded.first_at,second_tx=excluded.second_tx,second_at=excluded.second_at,event_count=excluded.event_count,updated_at=excluded.updated_at,last_tx=excluded.last_tx"
         ).bind(row.address, row.firstTx, row.firstAt, row.secondTx || null, row.secondAt || null,
           Number(row.eventCount || 1), now, row.lastTx || row.secondTx || row.firstTx));
+        for (const op of operations) {
+          if (!op.id || !op.address || !op.hash || !op.at || !/^[0-9]+([.][0-9]{1,7})?$/.test(op.amount)) return json({error:'invalid operation'},400);
+          statements.push(env.DB.prepare("INSERT INTO migration_operations(operation_id,address,transaction_hash,created_at,amount,predicate_json) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(operation_id) DO NOTHING").bind(op.id,op.address,op.hash,op.at,op.amount,JSON.stringify(op.predicate||{})));
+        }
+        if(body.verification){
+          statements.push(env.DB.prepare("INSERT INTO sync_state(name,cursor,updated_at) VALUES (?1,?2,?3) ON CONFLICT(name) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at").bind('evidence:'+body.verification.address,JSON.stringify(body.verification.evidence),now));
+        }
         if (body.meta) {
           statements.push(env.DB.prepare(
             "INSERT INTO sync_state (name,cursor,updated_at) VALUES ('crawler',?1,?2) ON CONFLICT(name) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at"
@@ -131,7 +150,7 @@ export default {
         }
         const results = statements.length ? await env.DB.batch(statements) : [];
         const rowsWritten = results.reduce((sum, result) => sum + Number(result.meta?.rows_written || 0), 0);
-        return json({ ok: true, saved: wallets.length, rowsWritten });
+        return json({ ok: true, saved: wallets.length, rowsWritten, ledgerProtocol:28 });
       } catch (error) {
         return json({ error: error.message }, 500);
       }

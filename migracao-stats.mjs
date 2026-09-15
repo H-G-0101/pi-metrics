@@ -205,18 +205,19 @@ async function callD1(path, options = {}) {
   return response.json();
 }
 
-async function syncD1Wallets(wallets, meta = null) {
+async function syncD1Wallets(wallets, meta = null, operations = [], verification = null) {
   if (!d1Enabled) return false;
   const rows = wallets.filter(Boolean);
   // One historical page and its cursor must commit together.
   if (rows.length > 200) throw new Error('D1 page exceeds 200 wallets');
-  const cost = rows.length * D1_ROWS_PER_WALLET + (meta ? 1 : 0);
+  const cost = rows.length * D1_ROWS_PER_WALLET + operations.length * 3 + (meta ? 1 : 0) + (verification ? 1 : 0);
   if (cost > budgetLeft()) {
     pauseD1('orçamento diário de escrita atingido', true);
     return false;
   }
   try {
-    const result = await callD1(D1_SYNC_URL, {method:'POST', body:JSON.stringify({wallets:rows,meta})});
+    const result = await callD1(D1_SYNC_URL, {method:'POST', body:JSON.stringify({wallets:rows,meta,operations,verification})});
+    if ((operations.length || verification) && result.ledgerProtocol!==28) throw new Error('Deploy v28 Worker: event ledger support required');
     spendBudget(Number.isFinite(result.rowsWritten) ? Math.max(0, result.rowsWritten) : cost);
     return true;
   } catch (error) {
@@ -320,7 +321,7 @@ async function getPage(cursor, order = 'asc') {
 }
 
 function migrationRecipient(operation) {
-  if (operation.type !== 'create_claimable_balance' || operation.source_account !== WALLET) {
+  if (operation.type !== 'create_claimable_balance' || operation.source_account !== WALLET || operation.transaction_successful===false || (operation.asset && operation.asset!=='native')) {
     return null;
   }
   const claimants = operation.claimants || [];
@@ -333,6 +334,50 @@ function migrationRecipient(operation) {
 
 function migrationDestination(operation) {
   return migrationRecipient(operation)?.destination || null;
+}
+
+function ledgerOperations(records) {
+  return records.filter(op=>migrationDestination(op) && op.asset==='native' && op.transaction_successful!==false && (op.id||op.paging_token) && op.transaction_hash).map(op=>({
+    id:String(op.id||op.paging_token),address:migrationDestination(op),hash:op.transaction_hash,
+    at:op.created_at,amount:String(op.amount),predicate:migrationRecipient(op).predicate||{},
+  }));
+}
+
+async function verifyTopWallets() {
+  state.walletEvidence ||= {};
+  const ranking = weeklyMetrics().ranking;
+  for (const row of ranking) {
+    const address=row.address;
+    if(!state.walletEvidence[address] && d1Enabled){
+      const restored=await callD1(D1_RESTORE_URL.replace('/d1/restore','/d1/evidence')+'?address='+encodeURIComponent(address));
+      if(restored.evidence)state.walletEvidence[address]=restored.evidence;
+    }
+    let evidence=state.walletEvidence[address] || {cursor:'',events:[],genesis:false,complete:false};
+    // Continue from the saved cursor; do not repeatedly scan old operations.
+    for(let page=0;page<100;page++){
+      let data;
+      try{data=await getJson(`/accounts/${address}/operations?order=asc&limit=200${evidence.cursor?'&cursor='+encodeURIComponent(evidence.cursor):''}`);}
+      catch(error){evidence={...evidence,complete:false,error:error.message};break;}
+      const records=data?._embedded?.records;
+      if(!records){evidence={...evidence,complete:false,error:'History unavailable'};break;}
+      const next={...evidence,events:evidence.events.map(e=>({...e})),complete:false,error:null};
+      if(!evidence.cursor && records.length)next.genesis=records[0].type==='create_account' && records[0].account===address;
+      const operations=ledgerOperations(records).filter(op=>op.address===address);
+      for(const op of operations){
+        if(!next.events.some(event=>event.hash===op.hash))next.events.push({hash:op.hash,at:op.at});
+      }
+      next.cursor=records.at(-1)?.paging_token||evidence.cursor;
+      if(records.length && (!next.cursor || next.cursor===evidence.cursor)){evidence={...evidence,complete:false,error:'History cursor did not advance'};break;}
+      next.complete=records.length<200 && next.genesis;
+      next.checkedAt=new Date().toISOString();
+      if(d1Enabled && !await syncD1Wallets([],null,operations,{address,evidence:next}))return;
+      evidence=next;state.walletEvidence[address]=evidence;
+      if(records.length<200)break;
+      await sleep(THROTTLE_MS);
+    }
+    state.walletEvidence[address]=evidence;
+    saveCheckpoint();
+  }
 }
 
 function absolutePredicateMs(value) {
@@ -641,11 +686,15 @@ function classifyRecentEvents() {
   return rows.map(event => {
     const entry = state.byDest[event.address];
     const birth = state.accountBirth?.[event.address];
+    const evidence=state.walletEvidence?.[event.address];
+    const verifiedIndex=evidence?.genesis ? evidence.events.findIndex(row=>row.hash===event.transactionHash) : -1;
     let migrationNumber = null;
     let classifiedBy = null;
     const createdAccountKey = `${event.transactionHash}:${event.address}`;
     // Ordem: sinal on-chain direto > índice histórico > inferência.
-    if (state.recentCreatedAccountKeys?.[createdAccountKey]) {
+    if (verifiedIndex >= 0) {
+      migrationNumber=verifiedIndex+1;classifiedBy='wallet_history';
+    } else if (state.recentCreatedAccountKeys?.[createdAccountKey]) {
       migrationNumber = 1; classifiedBy = 'create_account';
     } else if (!state.coverageFrom && entry?.firstTx === event.transactionHash) {
       migrationNumber = 1; classifiedBy = 'index';
@@ -658,7 +707,12 @@ function classifyRecentEvents() {
       migrationNumber = 1; classifiedBy = 'account_birth';
     }
 
-    return { ...event, migrationNumber, classifiedBy };
+    return { ...event, migrationNumber, classifiedBy, evidence: {
+      status:migrationNumber ? 'Confirmed' : evidence && !evidence.complete ? 'Incomplete history' : 'Pending',
+      method:classifiedBy||'Historical evidence needed',transactionHash:event.transactionHash,
+      checkedAt:evidence?.checkedAt||null,
+      previous:verifiedIndex>0?evidence.events[verifiedIndex-1]:null,
+    } };
   });
 }
 
@@ -757,6 +811,7 @@ function weeklyMetrics(now = Date.now(), events = classifyRecentEvents()) {
       eventCount: row.eventCount,
       balanceCount: row.balanceCount,
       latestAt: row.latestAt,
+      evidence: events.filter(event=>event.address===row.address && Date.parse(event.createdAt)>=cutoff).map(event=>({...event.evidence,migrationNumber:event.migrationNumber,createdAt:event.createdAt})),
       tranches: row.tranches.sort((a, b) =>
         (a.migrationNumber || 99) - (b.migrationNumber || 99)
         || Number(a.lockSeconds || 0) - Number(b.lockSeconds || 0)),
@@ -810,7 +865,7 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
     if (event.classifiedBy === 'create_account') sources.createAccount++;
     else if (event.classifiedBy === 'index') sources.index++;
     else if (event.classifiedBy === 'account_birth') sources.accountBirth++;
-    else if (event.classifiedBy === 'account_age') sources.accountAge++;
+    else if (event.classifiedBy === 'wallet_history') sources.index++;
     else if (event.classifiedBy === 'inferred') sources.inferred++;
   }
   const verified = sources.createAccount + sources.index + sources.accountBirth;
@@ -972,6 +1027,8 @@ function buildReport({ complete }) {
 
   return {
     schemaVersion: 15,
+    releaseVersion: 28,
+    eventLedger: {mode:'incremental',fullHistory:false,verifiedWallets:Object.keys(state.walletEvidence||{}).length},
     classificationPolicy: 'confirmed-only-v27',
     lifetimeBasis: 'persistent-index',
     lifetimeOrdinalReliable: !state.coverageFrom,
@@ -1094,8 +1151,10 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   await restoreFromD1();
   await refreshRecentEvents();
   await verifyAccountOrigins();
+  await verifyTopWallets();
   saveCheckpoint();
   await publishProgress(false);
+  if(d1Paused)return;
 
   const seedFinished = await seedD1();
   if (!seedFinished) {
@@ -1117,7 +1176,8 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
   let complete = false;
   while (!MAX_PAGES || pagesThisRun < MAX_PAGES) {
     if(Date.now()-Date.parse(state.recentScan?.completedAt||0)>15*60000){
-      await refreshRecentEvents();await verifyAccountOrigins();await publishProgress(false);
+      await refreshRecentEvents();await verifyAccountOrigins();await verifyTopWallets();await publishProgress(false);
+      if(d1Paused){saveCheckpoint();break;}
     }
     const page = await getPage(state.cursor);
     const records = page._embedded?.records || [];
@@ -1148,7 +1208,7 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
 
     if (d1Enabled && state.d1Ready) {
       try {
-        if (!await syncD1Wallets([...changedAddresses].map(walletSnapshot), d1Meta(false))) rollbackPage();
+        if (!await syncD1Wallets([...changedAddresses].map(walletSnapshot), d1Meta(false), ledgerOperations(records))) rollbackPage();
       } catch (error) {
         rollbackPage();
         console.log(`Aviso: D1 perdeu a sincronização (${error.message}); será recopiado.`);

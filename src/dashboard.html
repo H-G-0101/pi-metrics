@@ -234,6 +234,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
 .day{cursor:pointer}.day:focus-visible{outline:2px solid #b685ff;outline-offset:3px}
 .insight-table th,.insight-table td{padding:12px 8px}
 @media(max-width:700px){.insight-table th,.insight-table td{font-size:12px;padding:10px 5px}.insight-pi{font-size:12px;white-space:normal}}
+.evidence{min-width:160px}.evidence summary{cursor:pointer;color:#f0eaff;font-size:13px;list-style:none;padding:10px 12px;border-radius:10px;background:#253449;border:1px solid #4d647e}.evidence.confirmed summary{background:#173933;border-color:#377f70}.evidence.pending summary{background:#3a3020;border-color:#826a36}.evidence summary span{display:block;font-size:11px;color:#c7d3e2;margin-top:4px}.evidence-body{padding:12px;background:#0e1625;border:1px solid #334361;border-radius:10px;margin-top:8px;max-width:340px;overflow-wrap:anywhere;font-size:12px;line-height:1.7}.evidence-body p+p{border-top:1px solid #334361;padding-top:12px}.evidence-body a{color:#8fc7ff}.tranche{align-items:flex-start;max-width:440px}.tranche .lock{white-space:normal;line-height:1.6}.lock-detail{background:#0e1625;padding:12px;border-left:3px solid #ae81ed;border-radius:8px}.lifetime-grid .stat-value{font-size:clamp(25px,3.6vw,48px)!important;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.evidence summary:focus-visible{outline:2px solid #bb94ff}
 </style>
 </head>
 <body>
@@ -459,6 +460,7 @@ function updateRefinedStatus(stats){
   $('qualityNote').textContent=partial?'Partial data — historical indexing or the recent scan is still incomplete. Classified metrics may change.':'Scan complete as of the latest report.';
   if(Number(stats.schemaVersion||0)<15){$('qualityNote').textContent='Legacy report: update the Worker and complete a v27 crawler publication before relying on classifications.';}
   if(stats.lifetimeOrdinalReliable===false){$('qualityNote').textContent='Historical gap detected. Lifetime migration rounds need a full history review.';$('firstTotal').textContent='—';$('secondTotal').textContent='—';}
+  if(Number(stats.releaseVersion||0)<28)$('qualityNote').textContent+=' Event evidence awaits the v28 crawler publication.';
   if(stats.lifetimeTotalsProtected)$('qualityNote').textContent+=' Lifetime counters may retain previously published higher values; these are not a substitute for the detailed index.';
   $('healthStorage').textContent=stats.storage?.error?'Sync failed: '+stats.storage.error:stats.storage?.d1Ready?'Persistent at last report':stats.storage?.d1SeedInProgress?'Initial copy in progress':'Persistence not confirmed';
   const coverage=stats.indexCoverageFrom?new Date(stats.indexCoverageFrom).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):null;
@@ -473,6 +475,7 @@ function updateRefinedStatus(stats){
 }
 function compactCardNumbers(){
   document.querySelectorAll('.stat-value,.largest-amount').forEach(el=>{
+    if(el.id==='firstTotal'||el.id==='secondTotal')return;
     const raw=el.textContent;const match=raw.match(/^([\d,.]+)( Pi)?$/);if(!match)return;
     const value=Number(match[1].replaceAll(',',''));el.title=raw;
     if(value>=1000)el.textContent=new Intl.NumberFormat('en-US',{notation:'compact',minimumFractionDigits:2,maximumFractionDigits:2}).format(value)+(match[2]||'');
@@ -488,8 +491,9 @@ function renderMobileWallets(rows){
     const summary=document.createElement('summary');summary.textContent='#'+row.rank+' · '+shortAddress(row.address)+' · '+fmtPi(row.amountPi,2)+' Pi · '+englishMigrationType(row.migrationType);detail.append(summary);
     const address=document.createElement('p');address.textContent=row.address;detail.append(address);
     const copy=document.createElement('button');copy.type='button';copy.className='mobile-copy';copy.textContent='Copy wallet';copy.dataset.address=row.address;copy.onclick=()=>copyWallet(copy);detail.append(copy);
+    const evidence=document.createElement('div');evidence.innerHTML=evidenceDetails(row);detail.append(evidence);
     const balance=document.createElement('p');balance.dataset.balance=row.address;balance.textContent='Account balance: loading…';detail.append(balance);
-    for(const tranche of row.tranches||[]){const p=document.createElement('p');p.textContent=fmtPi(tranche.amountPi,7)+' Pi · '+(tranche.lockSeconds==null?'Lock period unavailable':formatLock(tranche.lockSeconds))+(tranche.unlockAt?' · Unlock date: '+new Date(tranche.unlockAt).toLocaleDateString('en-US'):'');detail.append(p);}
+    for(const tranche of row.tranches||[]){const p=document.createElement('p');p.className='lock-detail';p.textContent=fmtPi(tranche.amountPi,7)+' Pi · '+lockDetails(tranche);detail.append(p);}
     target.append(detail);
   }
   if(!rows.length)target.textContent='Waiting for weekly data…';
@@ -601,13 +605,13 @@ function renderRanking(rows){
       const migration=ordinal(tranche.migrationNumber);
       const lock=tranche.lockSeconds==null?'lock period unavailable':formatLock(tranche.lockSeconds);
       const until=tranche.unlockAt?' · unlock date '+new Date(tranche.unlockAt).toLocaleDateString('en-US') : '';
-      return '<span class="tranche '+(unlocked?'unlocked':'')+'" title="Lockup '+(index+1)+until+'"><b>'+migration+' migration · '+fmtPi(tranche.amountPi,7)+' Pi</b><span class="lock">'+(unlocked?'lock period ended':'locked for '+lock)+'</span></span>';
+      return '<span class="tranche '+(unlocked?'unlocked':'')+'"><b>'+migration+' migration · '+fmtPi(tranche.amountPi,7)+' Pi</b><span class="lock">'+escapeText(lockDetails(tranche))+'</span></span>';
     }).join('');
     return '<tr class="wallet-row '+tone+'"><td class="rank">#'+row.rank+'</td>'+
       '<td class="address"><span class="address-cell"><span title="'+row.address+'">'+shortAddress(row.address)+'</span>'+
       '<button class="copy-wallet" type="button" data-address="'+row.address+'" title="Copy wallet" aria-label="Copy wallet '+row.address+'">'+
       '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg><span class="copy-label">Copied</span></button></span></td>'+
-      '<td><span class="'+cls+'">'+migrationType+'</span></td>'+
+      '<td>'+evidenceDetails(row)+'</td>'+
       '<td>'+fmt(row.balanceCount)+'</td>'+
       '<td class="current-balance '+(cached?'':'loading')+'" data-balance="'+row.address+'">'+balance+'</td>'+
       '<td class="amount">'+fmtPi(row.amountPi,7)+' Pi</td></tr>'+
@@ -615,6 +619,25 @@ function renderRanking(rows){
       (tranches||'<span class="tranche"><span class="lock">waiting for the next scan…</span></span>')+'</div></td></tr>';
   }).join('');
   loadRankingBalances(rows);
+}
+
+function escapeText(value){const span=document.createElement('span');span.textContent=String(value??'');return span.innerHTML;}
+function lockDetails(tranche){
+  const original=tranche.lockSeconds==null?'Unknown':formatLock(tranche.lockSeconds);
+  const end=Date.parse(tranche.unlockAt);
+  if(!Number.isFinite(end))return 'Original lock: '+original+' · Unlock date unavailable';
+  const remaining=Math.max(0,(end-Date.now())/1000);
+  return 'Original lock: '+original+' · Unlocks: '+new Date(end).toLocaleDateString('en-US',{timeZone:'UTC'})+' UTC · '+(remaining?formatLock(remaining)+' remaining':'Lock ended; claim status not verified');
+}
+function evidenceDetails(row){
+  const items=row.evidence||[];
+  const pending=!items.length||items.some(item=>item.status!=='Confirmed');
+  return '<details class="evidence '+(pending?'pending':'confirmed')+'"><summary>'+escapeText(englishMigrationType(row.migrationType))+' <span>View evidence</span></summary><div class="evidence-body">'+
+    (items.length?items.map(item=>{
+      const hash=String(item.transactionHash||'');
+      const link=/^[a-f0-9]{64}$/i.test(hash)?'<a target="_blank" rel="noopener" href="/horizon/transactions/'+hash+'">'+hash+'</a>':escapeText(hash);
+      return '<p><b>'+escapeText(item.status)+' · '+(item.migrationNumber?ordinal(item.migrationNumber)+' migration':'Round unknown')+'</b><br>'+escapeText(({wallet_history:'Account history scanned from creation',index:'Chronological migration index',create_account:'Matching account creation',account_birth:'Verified account creation'})[item.method]||item.method)+'<br>'+escapeText(item.createdAt)+'<br>'+link+(item.previous?'<br>Previous migration: '+escapeText(item.previous.at)+'<br><code>'+escapeText(item.previous.hash)+'</code>':'')+(item.checkedAt?'<br>History checked: '+escapeText(item.checkedAt):'')+'</p>';
+    }).join(''):'<p>Historical evidence is still being collected. No round is assumed.</p>')+'</div></details>';
 }
 
 function englishMigrationType(value){
