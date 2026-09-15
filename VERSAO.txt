@@ -1,7 +1,7 @@
-PI Metrics — version 28 (permanent event ledger and wallet evidence)
+PI Metrics — version 29 (recipient validation, claim windows and exact sums)
 Package date: 2026-09-15
 
-Leia RELEASE-v28.md para regras atuais, instalação, testes e limitações.
+Leia RELEASE-v29.md para regras atuais, instalação, testes e limitações.
 O histórico de funcionalidades abaixo foi herdado das versões anteriores;
 em caso de diferença, RELEASE-v27.md descreve o comportamento atual.
 

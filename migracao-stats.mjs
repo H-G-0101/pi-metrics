@@ -325,15 +325,20 @@ function migrationRecipient(operation) {
     return null;
   }
   const claimants = operation.claimants || [];
-  return claimants.find(claimant =>
+  const candidates = claimants.filter(claimant =>
     claimant.destination
     && claimant.destination !== RECOVERY_WALLET
     && claimant.destination !== WALLET
   );
+  return candidates.length===1 ? candidates[0] : null;
 }
 
 function migrationDestination(operation) {
   return migrationRecipient(operation)?.destination || null;
+}
+function ambiguousRecipient(op){
+  return op.type==='create_claimable_balance' && op.source_account===WALLET && op.transaction_successful!==false && (!op.asset||op.asset==='native') &&
+    (op.claimants||[]).filter(c=>c.destination && c.destination!==WALLET && c.destination!==RECOVERY_WALLET).length>1;
 }
 
 function ledgerOperations(records) {
@@ -346,6 +351,11 @@ function ledgerOperations(records) {
 async function verifyTopWallets() {
   state.walletEvidence ||= {};
   const ranking = weeklyMetrics().ranking;
+  const top=new Set(ranking.map(row=>row.address));
+  const extra=[...new Set(Object.values(state.recentEvents).map(row=>row.address))].filter(address=>!top.has(address)).sort();
+  const start=Number(state.verificationOffset||0)%Math.max(1,extra.length);
+  for(let i=0;i<Math.min(20,extra.length);i++)ranking.push({address:extra[(start+i)%extra.length]});
+  state.verificationOffset=extra.length?(start+Math.min(20,extra.length))%extra.length:0;
   for (const row of ranking) {
     const address=row.address;
     if(!state.walletEvidence[address] && d1Enabled){
@@ -353,6 +363,7 @@ async function verifyTopWallets() {
       if(restored.evidence)state.walletEvidence[address]=restored.evidence;
     }
     let evidence=state.walletEvidence[address] || {cursor:'',events:[],genesis:false,complete:false};
+    if(evidence.policyVersion!==29)evidence={cursor:'',events:[],genesis:false,complete:false,policyVersion:29};
     // Continue from the saved cursor; do not repeatedly scan old operations.
     for(let page=0;page<100;page++){
       let data;
@@ -361,6 +372,7 @@ async function verifyTopWallets() {
       const records=data?._embedded?.records;
       if(!records){evidence={...evidence,complete:false,error:'History unavailable'};break;}
       const next={...evidence,events:evidence.events.map(e=>({...e})),complete:false,error:null};
+      next.ambiguous ||= records.some(ambiguousRecipient);
       if(!evidence.cursor && records.length)next.genesis=records[0].type==='create_account' && records[0].account===address;
       const operations=ledgerOperations(records).filter(op=>op.address===address);
       for(const op of operations){
@@ -389,21 +401,52 @@ function absolutePredicateMs(value) {
 }
 
 function unlockTimeFromPredicate(predicate, createdAt) {
-  if (!predicate || typeof predicate !== 'object') return null;
-  const createdMs = Date.parse(createdAt);
-  if (predicate.not?.rel_before != null && Number.isFinite(createdMs)) {
-    return createdMs + Number(predicate.not.rel_before) * 1000;
+  const origin=Date.parse(createdAt);
+  if(!Number.isFinite(origin))return null;
+  const merge=rows=>{
+    const out=[];
+    for(const [a,b] of rows.filter(([a,b])=>a<b).sort((x,y)=>x[0]-y[0])){
+      if(out.length && a<=out.at(-1)[1])out.at(-1)[1]=Math.max(out.at(-1)[1],b);
+      else out.push([a,b]);
+    }
+    return out;
+  };
+  function ranges(p,depth=0){
+    if(!p || typeof p!=='object' || Object.keys(p).length!==1 || depth>12)return null;
+    if(p.unconditional===true)return [[origin,Infinity]];
+    if(p.abs_before!=null || p.rel_before!=null){
+      const value=p.abs_before??p.rel_before;
+      if(typeof value!=='string' && typeof value!=='number')return null;
+      if(String(value).trim()==='')return null;
+      const end=p.abs_before!=null?absolutePredicateMs(value):origin+Number(value)*1000;
+      return Number.isFinite(end)?(end>origin?[[origin,end]]:[]):null;
+    }
+    if(p.not){
+      const child=ranges(p.not,depth+1);if(child===null)return null;
+      const out=[];let cursor=origin;
+      for(const [a,b] of child){if(cursor<a)out.push([cursor,a]);cursor=b;}
+      if(cursor<Infinity)out.push([cursor,Infinity]);return out;
+    }
+    const children=p.and||p.or;
+    if(!Array.isArray(children)||children.length!==2)return null;
+    const left=ranges(children[0],depth+1),right=ranges(children[1],depth+1);
+    if(left===null||right===null)return null;
+    return p.or?merge([...left,...right]):merge(left.flatMap(([a,b])=>right.map(([c,d])=>[Math.max(a,c),Math.min(b,d)])));
   }
-  if (predicate.not?.abs_before != null) return absolutePredicateMs(predicate.not.abs_before);
-  if (Array.isArray(predicate.and)) {
-    const times = predicate.and.map(item => unlockTimeFromPredicate(item, createdAt)).filter(Number.isFinite);
-    return times.length ? Math.max(...times) : null;
-  }
-  if (Array.isArray(predicate.or)) {
-    const times = predicate.or.map(item => unlockTimeFromPredicate(item, createdAt)).filter(Number.isFinite);
-    return times.length ? Math.min(...times) : null;
-  }
-  return null;
+  const windows=ranges(predicate);
+  // A single unlock date is valid only for an uninterrupted claim window.
+  return windows?.length===1 && windows[0][1]===Infinity ? windows[0][0] : null;
+}
+
+function piUnits(value){
+  const text=typeof value==='number'?value.toFixed(7):String(value);
+  if(!/^[0-9]+([.][0-9]{1,7})?$/.test(text))throw new Error('Invalid Pi amount: '+text);
+  const [whole,fraction='']=text.split('.');return BigInt(whole)*10000000n+BigInt(fraction.padEnd(7,'0'));
+}
+function piDecimal(units){return (units/10000000n).toString()+'.'+(units%10000000n).toString().padStart(7,'0');}
+function addExact(target,key,value){
+  const exact=piDecimal(piUnits(target[key+'Exact']??target[key]??0)+piUnits(value));
+  target[key+'Exact']=exact;target[key]=Number(exact);
 }
 
 function migrationTranche(operation) {
@@ -412,6 +455,7 @@ function migrationTranche(operation) {
   const unlockMs = unlockTimeFromPredicate(recipient?.predicate, operation.created_at);
   return {
     amountPi: +Number(operation.amount || 0).toFixed(7),
+    amountPiExact:piDecimal(piUnits(operation.amount||'0')),
     lockSeconds: Number.isFinite(unlockMs) && Number.isFinite(createdMs)
       ? Math.max(0, Math.round((unlockMs - createdMs) / 1000))
       : null,
@@ -457,6 +501,11 @@ function record(operation) {
 }
 
 function addRecentOperation(events, operation) {
+  if(ambiguousRecipient(operation)){
+    state.recentAmbiguities ||= {count:0,samples:[]};state.recentAmbiguities.count++;
+    if(state.recentAmbiguities.samples.length<20)state.recentAmbiguities.samples.push({id:operation.id||operation.paging_token,hash:operation.transaction_hash});
+    return;
+  }
   const address = migrationDestination(operation);
   if (!address || !operation.transaction_hash) return;
   const key = `${address}:${operation.transaction_hash}`;
@@ -468,7 +517,7 @@ function addRecentOperation(events, operation) {
     balanceCount: 0,
     tranches: [],
   });
-  event.amountPi += Number(operation.amount || 0);
+  addExact(event,'amountPi',operation.amount || '0');
   event.balanceCount++;
   event.tranches.push(migrationTranche(operation));
 }
@@ -479,6 +528,7 @@ async function refreshRecentEvents() {
   let pages = 0;
 
   state.recentEvents = {};
+  state.recentAmbiguities = {count:0,samples:[]};
   state.recentCreatedAccountKeys = {};
   state.recentScan = {
     complete: false,
@@ -687,12 +737,14 @@ function classifyRecentEvents() {
     const entry = state.byDest[event.address];
     const birth = state.accountBirth?.[event.address];
     const evidence=state.walletEvidence?.[event.address];
-    const verifiedIndex=evidence?.genesis ? evidence.events.findIndex(row=>row.hash===event.transactionHash) : -1;
+    const verifiedIndex=evidence?.genesis && !evidence.ambiguous && evidence.policyVersion===29 ? evidence.events.findIndex(row=>row.hash===event.transactionHash) : -1;
     let migrationNumber = null;
     let classifiedBy = null;
     const createdAccountKey = `${event.transactionHash}:${event.address}`;
     // Ordem: sinal on-chain direto > índice histórico > inferência.
-    if (verifiedIndex >= 0) {
+    if(evidence?.ambiguous){
+      classifiedBy='Ambiguous recipient in wallet history';
+    } else if (verifiedIndex >= 0) {
       migrationNumber=verifiedIndex+1;classifiedBy='wallet_history';
     } else if (state.recentCreatedAccountKeys?.[createdAccountKey]) {
       migrationNumber = 1; classifiedBy = 'create_account';
@@ -732,13 +784,13 @@ function dailySeries(days = 14, events = classifyRecentEvents()) {
     if (!row) continue;
     if (event.migrationNumber === 1) {
       row.first++;
-      row.firstPi += Number(event.amountPi || 0);
+      addExact(row,'firstPi',event.amountPiExact??event.amountPi??0);
     } else if (event.migrationNumber === 2) {
       row.second++;
-      row.secondPi += Number(event.amountPi || 0);
+      addExact(row,'secondPi',event.amountPiExact??event.amountPi??0);
     } else {
       row.pending++;
-      row.pendingPi += Number(event.amountPi || 0);
+      addExact(row,'pendingPi',event.amountPiExact??event.amountPi??0);
     }
   }
   for (const row of rows) {
@@ -752,14 +804,14 @@ function dailySeries(days = 14, events = classifyRecentEvents()) {
 function weeklyMetrics(now = Date.now(), events = classifyRecentEvents()) {
   const cutoff = now - WEEK_MS;
   const wallets = new Map();
-  let totalPi = 0;
+  let totalUnits = 0n;
   let firstEvents = 0;
   let secondEvents = 0;
   let pendingEvents = 0;
 
   for (const event of events) {
     if (Date.parse(event.createdAt) < cutoff) continue;
-    totalPi += event.amountPi;
+    totalUnits += piUnits(event.amountPiExact??event.amountPi);
     if (event.migrationNumber === 1) firstEvents++;
     if (event.migrationNumber === 2) secondEvents++;
     if (event.migrationNumber == null) pendingEvents++;
@@ -776,7 +828,7 @@ function weeklyMetrics(now = Date.now(), events = classifyRecentEvents()) {
       latestAt: null,
       tranches: [],
     };
-    row.amountPi += event.amountPi;
+    addExact(row,'amountPi',event.amountPiExact??event.amountPi);
     row.eventCount++;
     row.balanceCount += event.balanceCount;
     row.first ||= event.migrationNumber === 1;
@@ -799,6 +851,7 @@ function weeklyMetrics(now = Date.now(), events = classifyRecentEvents()) {
       rank: index + 1,
       address: row.address,
       amountPi: +row.amountPi.toFixed(7),
+      amountPiExact:row.amountPiExact,
       migrationType: row.first && row.second
         ? '1st & 2nd'
         : row.second
@@ -819,7 +872,8 @@ function weeklyMetrics(now = Date.now(), events = classifyRecentEvents()) {
 
   return {
     cutoff: new Date(cutoff).toISOString(),
-    totalPi: +totalPi.toFixed(7),
+    totalPi: Number(piDecimal(totalUnits)),
+    totalPiExact:piDecimal(totalUnits),
     walletCount: wallets.size,
     firstEvents,
     secondEvents,
@@ -840,7 +894,7 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
     if (!bucket) continue;
     const amount = Number(event.amountPi || 0);
     bucket.events++;
-    bucket.totalPi += amount;
+    addExact(bucket,'totalPi',event.amountPiExact??amount);
     bucket.amounts.push(amount);
   }
   const finish = bucket => {
@@ -854,6 +908,7 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
     return {
       events: bucket.events,
       totalPi: +bucket.totalPi.toFixed(7),
+      totalPiExact:bucket.totalPiExact||'0.0000000',
       averagePi: bucket.events ? +(bucket.totalPi / bucket.events).toFixed(7) : null,
       medianPi: median == null ? null : +median.toFixed(7),
     };
@@ -920,7 +975,7 @@ function migrationInsights(now = Date.now(), events = classifyRecentEvents()) {
     if (!type) continue;
     const amount = Number(event.amountPi || 0);
     totals[type].events++;
-    totals[type].totalPi += amount;
+    addExact(totals[type],'totalPi',event.amountPiExact??amount);
 
     const sizeKey = amount < 100
       ? 'under100'
@@ -943,7 +998,7 @@ function migrationInsights(now = Date.now(), events = classifyRecentEvents()) {
               ? 'sixToTwelveMonths'
               : 'overOneYear';
       lockups[lockKey][type].lockups++;
-      lockups[lockKey][type].totalPi += Number(tranche.amountPi || 0);
+      addExact(lockups[lockKey][type],'totalPi',tranche.amountPiExact??tranche.amountPi??0);
     }
 
     if (eventTime >= cutoff24h && (!largest24h[type] || amount > largest24h[type].amountPi)) {
@@ -1027,7 +1082,8 @@ function buildReport({ complete }) {
 
   return {
     schemaVersion: 15,
-    releaseVersion: 28,
+    releaseVersion: 29,
+    validation: {ambiguousRecentOperations:state.recentAmbiguities?.count||0,ambiguousSamples:state.recentAmbiguities?.samples||[],policyVersion:29},
     eventLedger: {mode:'incremental',fullHistory:false,verifiedWallets:Object.keys(state.walletEvidence||{}).length},
     classificationPolicy: 'confirmed-only-v27',
     lifetimeBasis: 'persistent-index',
@@ -1061,6 +1117,7 @@ function buildReport({ complete }) {
       from: week.cutoff,
       to: new Date(now).toISOString(),
       totalPi: week.totalPi,
+      totalPiExact:week.totalPiExact,
       walletCount: week.walletCount,
       firstMigrationEvents: week.firstEvents,
       secondMigrationEvents: week.secondEvents,

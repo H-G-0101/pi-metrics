@@ -461,6 +461,7 @@ function updateRefinedStatus(stats){
   if(Number(stats.schemaVersion||0)<15){$('qualityNote').textContent='Legacy report: update the Worker and complete a v27 crawler publication before relying on classifications.';}
   if(stats.lifetimeOrdinalReliable===false){$('qualityNote').textContent='Historical gap detected. Lifetime migration rounds need a full history review.';$('firstTotal').textContent='—';$('secondTotal').textContent='—';}
   if(Number(stats.releaseVersion||0)<28)$('qualityNote').textContent+=' Event evidence awaits the v28 crawler publication.';
+  if(stats.validation?.ambiguousRecentOperations)$('qualityNote').textContent+=' '+fmt(stats.validation.ambiguousRecentOperations)+' operations excluded: recipient ambiguous.';
   if(stats.lifetimeTotalsProtected)$('qualityNote').textContent+=' Lifetime counters may retain previously published higher values; these are not a substitute for the detailed index.';
   $('healthStorage').textContent=stats.storage?.error?'Sync failed: '+stats.storage.error:stats.storage?.d1Ready?'Persistent at last report':stats.storage?.d1SeedInProgress?'Initial copy in progress':'Persistence not confirmed';
   const coverage=stats.indexCoverageFrom?new Date(stats.indexCoverageFrom).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):null;

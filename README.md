@@ -1,6 +1,6 @@
 # Pi Mainnet — painel + estatística de migração
 
-**Atualização v28:** leia [RELEASE-v28.md](RELEASE-v28.md) antes de publicar.
+**Atualização v29:** leia [RELEASE-v29.md](RELEASE-v29.md) antes de publicar.
 As regras atuais excluem inferências de rodada, usam somente o índice persistente
 nos totais Lifetime e corrigem a retomada do D1. Essas regras substituem quaisquer
 descrições de versões anteriores abaixo. Publique Worker e crawler juntos.
