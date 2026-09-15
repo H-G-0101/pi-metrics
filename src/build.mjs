@@ -129,8 +129,9 @@ export default {
             "INSERT INTO sync_state (name,cursor,updated_at) VALUES ('crawler',?1,?2) ON CONFLICT(name) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at"
           ).bind(JSON.stringify(body.meta), now));
         }
-        if (statements.length) await env.DB.batch(statements);
-        return json({ ok: true, saved: wallets.length });
+        const results = statements.length ? await env.DB.batch(statements) : [];
+        const rowsWritten = results.reduce((sum, result) => sum + Number(result.meta?.rows_written || 0), 0);
+        return json({ ok: true, saved: wallets.length, rowsWritten });
       } catch (error) {
         return json({ error: error.message }, 500);
       }
@@ -179,7 +180,7 @@ export default {
         let previous = null;
         try { previous = JSON.parse(await env.STATS.get("migracao") || "null"); }
         catch (error) {}
-        if(!incoming || incoming.schemaVersion<14)return json({error:'Crawler update required: schema 14'},409);
+        if(!incoming || incoming.schemaVersion<15)return json({error:'Crawler update required: schema 15 (v27)'},409);
         if(!Number.isFinite(Date.parse(incoming.generatedAt)))return json({error:'Invalid report timestamp'},400);
         if(previous?.schemaVersion>=14 && Date.parse(incoming.generatedAt)<Date.parse(previous.generatedAt))return json({error:'Older report rejected'},409);
         incoming.lifetimeTotalsProtected=false;

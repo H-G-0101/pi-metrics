@@ -1,5 +1,10 @@
 # Pi Mainnet — painel + estatística de migração
 
+**Atualização v27:** leia [RELEASE-v27.md](RELEASE-v27.md) antes de publicar.
+As regras atuais excluem inferências de rodada, usam somente o índice persistente
+nos totais Lifetime e corrigem a retomada do D1. Essas regras substituem quaisquer
+descrições de versões anteriores abaixo. Publique Worker e crawler juntos.
+
 Um painel ao vivo da rede Pi mainnet e uma estatística de quem já recebeu a 2ª migração.
 Tudo roda hospedado: o app num **Cloudflare Worker**, o crawl no **GitHub Actions**. Sem PC.
 

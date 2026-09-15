@@ -1,5 +1,9 @@
-PI Metrics — version 26 (audited classification and persistence corrections)
-Package date: 2026-09-13
+PI Metrics — version 27 (confirmed classification and persistent lifetime index)
+Package date: 2026-09-15
+
+Leia RELEASE-v27.md para regras atuais, instalação, testes e limitações.
+O histórico de funcionalidades abaixo foi herdado das versões anteriores;
+em caso de diferença, RELEASE-v27.md descreve o comportamento atual.
 
 Inclui:
 - nova home com todas as estatísticas organizadas;

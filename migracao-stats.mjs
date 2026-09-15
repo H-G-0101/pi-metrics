@@ -35,11 +35,9 @@ const MAX_PAGES = Math.max(0, Number(process.env.MAX_PAGES || 0));
 // Com SKIP_HISTORY, o cursor pula direto para o presente: só as migrações
 // daqui pra frente entram no índice. O passado não indexado é abandonado.
 const SKIP_HISTORY = /^(1|true|yes|sim)$/i.test(process.env.SKIP_HISTORY || '');
-// Sem create_account na transação, a conta já existia antes do evento: só pode
-// ser a 2ª migração. Usado apenas quando o índice não conhece o hash.
-// Ponha INFER_SECOND=0 para voltar a depender só do índice.
-const INFER_SECOND = !/^(0|false|no|nao|não)$/i.test(process.env.INFER_SECOND || '1');
-// Verifica no Horizon quando a conta nasceu: transforma a inferência em fato.
+// Unknown history stays pending, regardless of legacy INFER_SECOND settings.
+const INFER_SECOND = false; // Missing history never establishes an ordinal.
+// Account creation can corroborate the first migration only.
 const VERIFY_ACCOUNTS = !/^(0|false|no|nao|não)$/i.test(process.env.VERIFY_ACCOUNTS || '1');
 const ACCOUNT_LOOKUP_LIMIT = Math.max(0, Number(process.env.ACCOUNT_LOOKUP_LIMIT || 40000));
 const ACCOUNT_LOOKUP_CONCURRENCY = Math.min(12, Math.max(1, Number(process.env.ACCOUNT_LOOKUP_CONCURRENCY || 6)));
@@ -175,6 +173,7 @@ function d1Meta(complete = false) {
     scannedRecords: state.scannedRecords,
     claimableBalances: state.claimableBalances,
     lastSeenAt: state.lastSeenAt,
+    coverageFrom: state.coverageFrom,
     complete,
   };
 }
@@ -207,20 +206,21 @@ async function callD1(path, options = {}) {
 }
 
 async function syncD1Wallets(wallets, meta = null) {
-  if (!d1Enabled) return;
+  if (!d1Enabled) return false;
   const rows = wallets.filter(Boolean);
   // One historical page and its cursor must commit together.
   if (rows.length > 200) throw new Error('D1 page exceeds 200 wallets');
   const cost = rows.length * D1_ROWS_PER_WALLET + (meta ? 1 : 0);
   if (cost > budgetLeft()) {
     pauseD1('orçamento diário de escrita atingido', true);
-    return;
+    return false;
   }
   try {
-    await callD1(D1_SYNC_URL, {method:'POST', body:JSON.stringify({wallets:rows,meta})});
-    spendBudget(cost);
+    const result = await callD1(D1_SYNC_URL, {method:'POST', body:JSON.stringify({wallets:rows,meta})});
+    spendBudget(Number.isFinite(result.rowsWritten) ? Math.max(0, result.rowsWritten) : cost);
+    return true;
   } catch (error) {
-    if (isQuotaError(error.message)) { pauseD1(error.message, true); return; }
+    if (isQuotaError(error.message)) { pauseD1(error.message, true); return false; }
     throw error;
   }
 }
@@ -234,25 +234,13 @@ async function restoreFromD1() {
     const meta = head.meta;
     if (!meta || meta.rebuilding) {
       if (!checkpointLoaded && meta?.rebuilding) throw new Error('D1 snapshot incomplete; restore the saved checkpoint before continuing');
-      state.d1SeedOffset=0;
+      if (!meta?.seedId || meta.seedId !== state.d1SeedId) state.d1SeedOffset=0;
       return false;
     }
     if (meta.wallet && meta.wallet !== WALLET) throw new Error('D1 wallet mismatch');
     if (checkpointLoaded && BigInt(state.cursor || '0') >= BigInt(meta.cursor || '0')) {
       if(meta.formatVersion===26 && state.cursor===meta.cursor){state.d1Ready=true;return true;}
-      // O checkpoint local está à frente do D1 (sync interrompida por cota, por
-      // exemplo). Rebobinar o cursor até o ponto do D1 custa páginas do Horizon,
-      // mas é idempotente e evita recopiar milhões de carteiras.
-      if (meta.formatVersion === 26 && meta.cursor) {
-        console.log(`Checkpoint à frente do D1; rebobinando o cursor para ${meta.cursor}.`);
-        state.cursor = meta.cursor;
-        state.pages = Number(meta.pages || 0);
-        state.scannedRecords = Number(meta.scannedRecords || 0);
-        state.claimableBalances = Number(meta.claimableBalances || 0);
-        state.d1Ready = true;
-        state.d1SeedOffset = 0;
-        return true;
-      }
+      // Keep the index and its cursor together; reseed the frozen local snapshot.
       // Recopy a frozen local snapshot, including entries changed since an old seed.
       state.d1SeedOffset=0;
       return false;
@@ -272,6 +260,7 @@ async function restoreFromD1() {
     state.byDest=restoredIndex;state.cursor=meta.cursor||'';state.pages=Number(meta.pages||0);
     state.scannedRecords=Number(meta.scannedRecords||0);state.claimableBalances=Number(meta.claimableBalances||0);
     state.lastSeenAt=meta.lastSeenAt||null;state.d1Ready=true;state.d1SeedOffset=0;
+    state.coverageFrom=meta.coverageFrom||null;
     console.log('D1 snapshot restored and verified');return true;
   }catch(error){
     d1Error=error.message;d1Enabled=false;state.d1Ready=false;
@@ -281,13 +270,15 @@ async function restoreFromD1() {
 }
 
 async function seedD1() {
-  if(!d1Enabled || state.d1Ready)return true;
+  if(state.d1Ready)return true;
+  if(!d1Enabled)return false;
   const addresses=Object.keys(state.byDest);
   const start=Math.min(Math.max(0,Number(state.d1SeedOffset||0)),addresses.length);
   try {
     // The historical cursor is frozen until every entry has been copied.
     if(start===0){
-      await callD1(D1_SYNC_URL,{method:'POST',body:JSON.stringify({wallets:[],resetSnapshot:true,meta:{...d1Meta(false),rebuilding:true}})});
+      state.d1SeedId = `${state.cursor}:${addresses.length}:${Date.now()}`;
+      if (!await syncD1Wallets([], {...d1Meta(false), rebuilding:true, seedId:state.d1SeedId})) {saveCheckpoint();return false;}
     }else{
       console.log(`Retomando a cópia para o D1 a partir da carteira ${start.toLocaleString('pt-BR')}.`);
     }
@@ -296,12 +287,12 @@ async function seedD1() {
         // Pausado por cota: guarda o ponto exato para o próximo run.
         state.d1SeedOffset=index;saveCheckpoint();return false;
       }
-      await syncD1Wallets(addresses.slice(index,index+D1_BATCH_SIZE).map(walletSnapshot));
-      state.d1SeedOffset=index+D1_BATCH_SIZE;
+      if (!await syncD1Wallets(addresses.slice(index,index+D1_BATCH_SIZE).map(walletSnapshot))) {saveCheckpoint();return false;}
+      state.d1SeedOffset=Math.min(index+D1_BATCH_SIZE,addresses.length);
       if(state.d1SeedOffset % (D1_BATCH_SIZE*200) === 0)saveCheckpoint();
     }
     if(!d1Enabled){saveCheckpoint();return false;}
-    await syncD1Wallets([],{...d1Meta(false),walletCount:addresses.length});
+    if (!await syncD1Wallets([],{...d1Meta(false),walletCount:addresses.length})) {saveCheckpoint();return false;}
     state.d1Ready=true;state.d1SeedOffset=0;d1Error=null;
     console.log('D1 frozen snapshot committed');return true;
   }catch(error){
@@ -516,14 +507,12 @@ async function getJson(path) {
   }
 }
 
-// A primeira operação de uma conta é o create_account que a criou. Sabendo
-// disso, um evento deixa de ser inferência: ou a conta nasceu naquela mesma
-// transação (1ª migração), ou já existia antes dela (2ª).
+// Validate the target and source of account creation; age does not prove a round.
 async function verifyAccountOrigins() {
   if (!VERIFY_ACCOUNTS || !ACCOUNT_LOOKUP_LIMIT) return;
   state.accountBirth ||= {};
   const addresses = [...new Set(Object.values(state.recentEvents).map(event => event.address))]
-    .filter(address => !state.accountBirth[address]);
+    .filter(address => !state.accountBirth[address]?.validated);
   if (!addresses.length) return;
 
   const queue = addresses.slice(0, ACCOUNT_LOOKUP_LIMIT);
@@ -539,7 +528,8 @@ async function verifyAccountOrigins() {
         const first = data?._embedded?.records?.[0];
         if (first) {
           state.accountBirth[address] = {
-            tx: first.type === 'create_account' ? first.transaction_hash : null,
+            tx: first.type === 'create_account' && first.account === address && first.source_account === WALLET ? first.transaction_hash : null,
+            validated: true,
             at: first.created_at || null,
           };
         }
@@ -568,6 +558,7 @@ async function verifyAccountOrigins() {
 // idempotente: se um rebobinamento de cursor acontecer antes, este salto o
 // anula, então o crawl nunca volta ao passado com SKIP_HISTORY ligado.
 async function jumpToPresent() {
+  throw new Error('SKIP_HISTORY is disabled: migration ordinals require continuous historical coverage.');
   const page = await getPage('', 'desc');
   const records = page._embedded?.records || [];
   if (!records.length) return false;
@@ -656,21 +647,15 @@ function classifyRecentEvents() {
     // Ordem: sinal on-chain direto > índice histórico > inferência.
     if (state.recentCreatedAccountKeys?.[createdAccountKey]) {
       migrationNumber = 1; classifiedBy = 'create_account';
-    } else if (entry?.firstTx === event.transactionHash) {
+    } else if (!state.coverageFrom && entry?.firstTx === event.transactionHash) {
       migrationNumber = 1; classifiedBy = 'index';
-    } else if (entry?.secondTx === event.transactionHash) {
+    } else if (!state.coverageFrom && entry?.secondTx === event.transactionHash) {
       migrationNumber = 2; classifiedBy = 'index';
-    } else if (entry?.lastTx === event.transactionHash) {
+    } else if (!state.coverageFrom && entry?.lastTx === event.transactionHash) {
       migrationNumber = entry.eventCount; classifiedBy = 'index';
-    } else if (birth?.tx === event.transactionHash) {
+    } else if (birth?.validated && birth?.tx === event.transactionHash) {
       // A conta nasceu nesta transação: 1ª migração, verificado no Horizon.
       migrationNumber = 1; classifiedBy = 'account_birth';
-    } else if (birth?.at && Date.parse(birth.at) < Date.parse(event.createdAt)) {
-      // A conta já existia antes do evento: não pode ser a 1ª migração.
-      migrationNumber = 2; classifiedBy = 'account_age';
-    } else if (INFER_SECOND) {
-      // Sem verificação disponível, assume-se conta pré-existente.
-      migrationNumber = 2; classifiedBy = 'inferred';
     }
 
     return { ...event, migrationNumber, classifiedBy };
@@ -828,7 +813,7 @@ function migrationAverages(now = Date.now(), events = classifyRecentEvents()) {
     else if (event.classifiedBy === 'account_age') sources.accountAge++;
     else if (event.classifiedBy === 'inferred') sources.inferred++;
   }
-  const verified = sources.createAccount + sources.index + sources.accountBirth + sources.accountAge;
+  const verified = sources.createAccount + sources.index + sources.accountBirth;
   return {
     days: Math.round(RECENT_RETENTION_MS / 86400000),
     from: new Date(cutoff).toISOString(),
@@ -950,7 +935,6 @@ function buildReport({ complete }) {
   const entries = destinationEntries.map(([, entry]) => entry);
   const recent = classifyRecentEvents();
   const firstAddresses=new Set(destinationEntries.map(([address])=>address));
-  for(const event of recent)if(event.migrationNumber===1)firstAddresses.add(event.address);
   const secondAddresses = new Set(
     destinationEntries.filter(([, entry]) => entry.secondTx).map(([address]) => address),
   );
@@ -966,11 +950,7 @@ function buildReport({ complete }) {
   );
   for (const event of recent) {
     if (event.migrationNumber !== 2) continue;
-    secondAddresses.add(event.address);
-    // Quem tem 2ª migração necessariamente teve a 1ª, mesmo que ela seja
-    // anterior ao início do índice. Sem isto o total de 2ªs poderia superar
-    // o de 1ªs, o que é impossível.
-    firstAddresses.add(event.address);
+    // Recent windows never mutate lifetime totals.
     const eventTime = Date.parse(event.createdAt);
     if (eventTime >= now - 86400000) second24hAddresses.add(event.address);
     if (eventTime >= now - WEEK_MS) second7dAddresses.add(event.address);
@@ -991,7 +971,10 @@ function buildReport({ complete }) {
   const insights = migrationInsights(now, recent);
 
   return {
-    schemaVersion: 14,
+    schemaVersion: 15,
+    classificationPolicy: 'confirmed-only-v27',
+    lifetimeBasis: 'persistent-index',
+    lifetimeOrdinalReliable: !state.coverageFrom,
     wallet: WALLET,
     generatedAt: new Date(now).toISOString(),
     complete,
@@ -1142,6 +1125,18 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
       complete = true;
       break;
     }
+    // Retain just this page's previous entries so a refused write cannot force
+    // a full multi-million-wallet reseed on the next scheduled run.
+    const beforePage = {cursor:state.cursor,pages:state.pages,scannedRecords:state.scannedRecords,claimableBalances:state.claimableBalances,lastSeenAt:state.lastSeenAt};
+    const previousEntries = new Map();
+    for (const operation of records) {
+      const address = migrationDestination(operation);
+      if (address && !previousEntries.has(address)) previousEntries.set(address,state.byDest[address] ? {...state.byDest[address]} : null);
+    }
+    const rollbackPage = () => {
+      Object.assign(state,beforePage);
+      for (const [address,entry] of previousEntries) {if(entry)state.byDest[address]=entry;else delete state.byDest[address];}
+    };
     const changedAddresses = new Set();
     for (const operation of records) {
       const address = record(operation);
@@ -1153,8 +1148,9 @@ process.on('SIGTERM', () => { void stop('SIGTERM'); });
 
     if (d1Enabled && state.d1Ready) {
       try {
-        await syncD1Wallets([...changedAddresses].map(walletSnapshot), d1Meta(false));
+        if (!await syncD1Wallets([...changedAddresses].map(walletSnapshot), d1Meta(false))) rollbackPage();
       } catch (error) {
+        rollbackPage();
         console.log(`Aviso: D1 perdeu a sincronização (${error.message}); será recopiado.`);
         state.d1Ready = false;
         state.d1SeedOffset = 0;
