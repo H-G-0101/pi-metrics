@@ -88,6 +88,10 @@ export async function collectFocus(env){
     return {changed,wallets};
   }
   try{
+    if(!state.lastMigrationLoaded){
+      const latest=await DB.prepare('SELECT at,hash FROM focus_events ORDER BY at DESC LIMIT 1').first();
+      state.lastMigrationAt=latest?.at||null;state.lastMigrationHash=latest?.hash||null;state.lastMigrationLoaded=true;
+    }
     if(!state.startedAt){
       // A new epoch starts at the latest operation, never at an old backlog cursor.
       // Carry known same-day usage so activation cannot reset the storage allowance.
@@ -122,6 +126,7 @@ export async function collectFocus(env){
         events.set(key,event);
       }
       const next={...state,cursor:records.at(-1)?.paging_token||state.cursor,backlog:records.length===200,checkedAt:new Date().toISOString()};
+      for(const receipt of receipts)if(!next.lastMigrationAt||receipt.at>=next.lastMigrationAt){next.lastMigrationAt=receipt.at;next.lastMigrationHash=receipt.hash;}
       const changes=prepareChanges(addresses,prior.events,[...events.values()],evidence,next);
       await save(next,changes.changed,changes.wallets);
       if(records.length<200)break;
@@ -161,7 +166,20 @@ export async function collectFocus(env){
         ranking={updatedAt:new Date().toISOString(),complete:state.startedAt<=from&&!state.backlog&&!error,rows:rows.map((r,i)=>({rank:i+1,address:r.address,amountPi:decimal(r.units),type:[r.first?'1st':null,r.second?'2nd':null,r.later?'Later':null,r.pending?'Pending':null].filter(Boolean).join(' / ')}))};
       }catch(e){ranking={...(ranking||{rows:[]}),error:e.message};}
     }
-    const snapshot={version:36,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
+    // The source balance is independent of receipts and never blocks their commit.
+    let sourceAccount=lease.snapshot?JSON.parse(lease.snapshot).sourceAccount:null;
+    if(!sourceAccount||Date.now()-Date.parse(sourceAccount.attemptedAt||0)>=300000){
+      const attemptedAt=new Date().toISOString();
+      try{
+        const response=await fetch(API+'/accounts/'+SOURCE,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(10000)});
+        if(!response.ok)throw new Error('Source balance HTTP '+response.status);
+        const account=await response.json();
+        const balance=(account.balances||[]).find(b=>b.asset_type==='native')?.balance;
+        if(!/^\d+(\.\d{1,7})?$/.test(String(balance)))throw new Error('Source balance unavailable');
+        sourceAccount={address:SOURCE,balance,checkedAt:attemptedAt,attemptedAt,error:null};
+      }catch(e){sourceAccount={...(sourceAccount||{address:SOURCE,balance:null,checkedAt:null}),attemptedAt,error:e.message};}
+    }
+    const snapshot={version:37,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
     await DB.prepare('UPDATE focus_control SET snapshot=?1,state=?2,owner=NULL,lease_until=0 WHERE id=1 AND owner=?3').bind(JSON.stringify(snapshot),JSON.stringify(state),owner).run();
   }finally{
     await DB.prepare('UPDATE focus_control SET owner=NULL,lease_until=0 WHERE id=1 AND owner=?1').bind(owner).run();

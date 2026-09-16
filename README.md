@@ -1,4 +1,12 @@
-# Pi Migration Monitor — v36
+# Pi Migration Monitor — v37
+
+## Novidade da v37
+
+A home exibe o endereço completo da carteira de migração, link para o explorador e botão de copiar. Mostra o saldo nativo dessa carteira com cache de cinco minutos, sem consultar saldos de destinatários. O saldo é o informado pela conta e não uma estimativa de valor livre após reservas. Uma falha nessa consulta preserva o último saldo conhecido, informa o atraso e não impede a gravação das migrações.
+
+A última migração observada é persistida junto ao cursor e usa apenas recebimentos create_claimable_balance válidos da origem. Pagamentos e outras operações não alteram esse horário. A idade aparece em minutos, depois horas e dias, com data absoluta ao passar o mouse. Antes do primeiro recebimento observado, aparece "Not observed yet". O valor se refere ao período acompanhado, e pode estar atrasado se houver fila ou falha de coleta.
+
+A atualização da v36 para a v37 não inicia outro período nem zera contadores. O horário da última migração já armazenada é recuperado uma única vez das tabelas focus existentes. O Worker retorna version 37 em /live. As instruções abaixo sobre ativação da v36 continuam valendo para a primeira ativação do monitor enxuto.
 
 Versão enxuta: carteiras com primeira migração confirmada, carteiras com segunda migração confirmada e Top 20 por Pi recebido nos últimos sete dias. Interface em inglês, números K/M, cópia de endereço, horário da última coleta e pendências de classificação.
 
@@ -22,7 +30,7 @@ O Top 20 soma todos os recebimentos observados por carteira na janela de sete di
 
 ## Trabalho removido da execução
 
-Não há coleta de saldos disponíveis, análises de duração de bloqueios, médias, medianas, volumes gerais, distribuições, gráficos, indexação global ou recuperação automática dos 15 dias. A home consulta somente `/live`. As rotas antigas `/stats`, `/d1/*`, `/wallet-balances` e `/horizon/*` retornam 410; não consultam bancos nem a blockchain. O código anterior foi arquivado em `legacy/` para referência e não é incluído no Worker.
+Não há coleta de saldos de destinatários, análises de duração de bloqueios, médias, medianas, volumes gerais, distribuições, gráficos, indexação global ou recuperação automática dos 15 dias. Apenas o saldo da origem é consultado a cada cinco minutos. A home consulta somente `/live`. As rotas antigas `/stats`, `/d1/*`, `/wallet-balances` e `/horizon/*` retornam 410; não consultam bancos nem a blockchain. O código anterior foi arquivado em `legacy/` para referência e não é incluído no Worker.
 
 Guardar o valor dos lockups ainda é necessário para ordenar o Top 20. IDs das operações ficam junto ao evento; não há uma segunda gravação de cada operação em um arquivo global. Uma página é agregada por destinatário e transação e gravada em lote com o cursor e os contadores, de forma atômica.
 

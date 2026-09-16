@@ -1,8 +1,10 @@
-Pi Migration Monitor — v36
+Pi Migration Monitor — v37
 
 Dois contadores cumulativos confirmados e Top 20 semanal.
 Novo período inicia na primeira ativação bem-sucedida da v36.
-Sem recuperação de 15 dias, relatórios extensos ou coleta de saldos.
+Sem recuperação de 15 dias, relatórios extensos ou coleta de saldos de destinatários.
+Carteira de origem na tela, saldo da origem com cache de 5 minutos e idade da última migração observada.
+Atualizar da v36 para a v37 preserva o início da coleta e os contadores.
 Sem dependência do GitHub Actions. Coleta no Cron do Worker.
 Dados e evidências antigos preservados no mesmo D1.
 
