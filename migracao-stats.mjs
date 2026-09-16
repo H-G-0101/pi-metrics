@@ -56,6 +56,8 @@ const D1_DAILY_ROW_BUDGET = Math.max(0, Number(process.env.D1_DAILY_ROW_BUDGET |
 const D1_ROWS_PER_WALLET = Math.max(1, Number(process.env.D1_ROWS_PER_WALLET || 2));
 const CK = process.env.CHECKPOINT_FILE || './checkpoint.json';
 const CK_PARTS = `${CK}.parts`;
+const RECENT_CK = `${CK_PARTS}/recent-cache`;
+const RECENT_MAX_PAGES = Math.max(1,Number(process.env.RECENT_MAX_PAGES || 200));
 const CHECKPOINT_SHARD_SIZE = Math.max(1000, Number(process.env.CHECKPOINT_SHARD_SIZE || 25000));
 const OUT = process.env.OUTPUT_FILE || './migracao-stats.json';
 const STATE_VERSION = 3;
@@ -129,6 +131,7 @@ function loadState() {
 }
 
 let state = loadState();
+loadRecentCheckpoint();
 let d1Error = null;
 let d1Enabled = Boolean(D1_SYNC_URL && D1_RESTORE_URL && PUSH_TOKEN);
 let d1Paused = false;
@@ -522,66 +525,102 @@ function addRecentOperation(events, operation) {
   event.tranches.push(migrationTranche(operation));
 }
 
-async function refreshRecentEvents() {
-  const cutoff = Date.now() - RECENT_RETENTION_MS;
-  let cursor = '';
-  let pages = 0;
-
-  state.recentEvents = {};
-  state.recentAmbiguities = {count:0,samples:[]};
-  state.recentCreatedAccountKeys = {};
-  state.recentScan = {
-    complete: false,
-    pages: 0,
-    newestAt: null,
-    oldestAt: null,
-    startedAt: new Date().toISOString(),
-    cutoffAt: new Date(cutoff).toISOString(),
-  };
-  console.log('Atualizando primeiro a janela recente de 15 dias…');
-  while (true) {
-    const page = await getPage(cursor, 'desc');
-    const records = page._embedded?.records || [];
-    if (!records.length) break;
-
-    let reachedCutoff = false;
-    for (const operation of records) {
-      if (Date.parse(operation.created_at) < cutoff) {
-        reachedCutoff = true;
-        continue;
-      }
-      if (
-        operation.type === 'create_account'
-        && operation.source_account === WALLET
-        && operation.transaction_hash
-        && operation.account
-      ) {
-        state.recentCreatedAccountKeys[`${operation.transaction_hash}:${operation.account}`] = true;
-      }
-      addRecentOperation(state.recentEvents, operation);
+function loadRecentCheckpoint(){
+  try{
+    const manifest=JSON.parse(readFileSync(`${RECENT_CK}/manifest.json`,'utf8'));
+    if(manifest.version!==35||manifest.wallet!==WALLET||manifest.recoveryWallet!==RECOVERY_WALLET)throw new Error('incompatible recent cache');
+    const recentEvents={},recentCreatedAccountKeys={};
+    for(let i=0;i<manifest.parts;i++){
+      const part=JSON.parse(readFileSync(`${RECENT_CK}/${manifest.generation}/part-${i}.json`,'utf8'));
+      Object.assign(recentEvents,Object.fromEntries(part.events));
+      Object.assign(recentCreatedAccountKeys,Object.fromEntries(part.births));
     }
-
-    pages++;
-    cursor = records.at(-1).paging_token;
-    const validDates = records.map(row => row.created_at).filter(Boolean).sort();
-    state.recentScan.pages = pages;
-    state.recentScan.newestAt ||= validDates.at(-1) || null;
-    state.recentScan.oldestAt = validDates[0] || state.recentScan.oldestAt;
-
-    if (pages === 1 || pages % RECENT_PUSH_EVERY_PAGES === 0) {
-      console.log(`Publicando amostra recente parcial (${pages.toLocaleString('pt-BR')} páginas)…`);
-      await publishProgress(false);
-    }
-    if (reachedCutoff || records.length < PAGE_LIMIT) break;
-    await sleep(THROTTLE_MS);
+    Object.assign(state,{recentEvents,recentCreatedAccountKeys,recentScan:manifest.scan,recentCursor:manifest.cursor,recentAmbiguities:manifest.ambiguities});
+    pruneRecentEvents();
+    console.log('Janela recente e cursores restaurados; retomada incremental.');
+  }catch(error){
+    if(existsSync(`${RECENT_CK}/manifest.json`))console.log(`Cache recente incompleto: reconstruindo sem pular páginas (${error.message}).`);
+    state.recentCursor=null;
   }
-
-  state.recentScan.complete = true;
-  state.recentScan.completedAt = new Date().toISOString();
-  console.log(
-    `Janela recente pronta: ${Object.keys(state.recentEvents).length.toLocaleString('pt-BR')} eventos em `
-    + `${pages.toLocaleString('pt-BR')} páginas.`,
-  );
+}
+function saveRecentCheckpoint(){
+  if(!state.recentCursor)return;
+  mkdirSync(RECENT_CK,{recursive:true});
+  const generation=`recent-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  mkdirSync(`${RECENT_CK}/${generation}`,{recursive:true});
+  const events=Object.entries(state.recentEvents),births=Object.entries(state.recentCreatedAccountKeys);
+  const parts=Math.ceil(Math.max(events.length,births.length)/1000);
+  for(let i=0;i<parts;i++)writeFileSync(`${RECENT_CK}/${generation}/part-${i}.json`,JSON.stringify({events:events.slice(i*1000,(i+1)*1000),births:births.slice(i*1000,(i+1)*1000)}));
+  const manifest={version:35,wallet:WALLET,recoveryWallet:RECOVERY_WALLET,generation,parts,cursor:state.recentCursor,scan:state.recentScan,ambiguities:state.recentAmbiguities};
+  writeFileSync(`${RECENT_CK}/manifest.tmp`,JSON.stringify(manifest));
+  renameSync(`${RECENT_CK}/manifest.tmp`,`${RECENT_CK}/manifest.json`);
+  for(const name of readdirSync(RECENT_CK))if(name.startsWith('recent-')&&name!==generation)rmSync(`${RECENT_CK}/${name}`,{recursive:true,force:true});
+}
+async function refreshRecentEvents() {
+  const cutoff=Date.now()-RECENT_RETENTION_MS;
+  if(!state.recentCursor){
+    state.recentEvents={};state.recentCreatedAccountKeys={};state.recentAmbiguities={count:0,samples:[]};
+    state.recentCursor={head:null,backfill:null,backfillDone:false};
+    state.recentScan={pages:0,newestAt:null,oldestAt:null};
+  }
+  const scan=state.recentScan;
+  Object.assign(scan,{complete:false,startedAt:new Date().toISOString(),cutoffAt:new Date(cutoff).toISOString()});
+  pruneRecentEvents();
+  let pages=0,forwardDone=false;
+  async function readRecentPage(cursor,order){
+    const records=(await getPage(cursor,order))._embedded?.records;
+    if(!Array.isArray(records)||records.some(r=>!/^\d+$/.test(String(r.paging_token))||!Number.isFinite(Date.parse(r.created_at))))throw new Error('Invalid recent operations page; cursor preserved');
+    return records;
+  }
+  function absorb(records){
+    for(const operation of records){
+      if(Date.parse(operation.created_at)<cutoff)continue;
+      if(operation.type==='create_account'&&operation.transaction_successful!==false&&operation.source_account===WALLET&&operation.transaction_hash&&operation.account)state.recentCreatedAccountKeys[`${operation.transaction_hash}:${operation.account}`]=operation.created_at;
+      addRecentOperation(state.recentEvents,operation);
+      if(operation.created_at){scan.newestAt=!scan.newestAt||operation.created_at>scan.newestAt?operation.created_at:scan.newestAt;scan.oldestAt=!scan.oldestAt||operation.created_at<scan.oldestAt?operation.created_at:scan.oldestAt;}
+    }
+    pages++;scan.pages++;
+  }
+  async function checkpoint(){
+    if(pages===1||pages%RECENT_PUSH_EVERY_PAGES===0){saveRecentCheckpoint();await publishProgress(false);}
+  }
+  console.log('Atualizando janela de 15 dias a partir dos cursores salvos…');
+  try{
+    if(!state.recentCursor.head){
+      const records=await readRecentPage('','desc');
+      absorb(records);
+      if(records.length){
+        state.recentCursor.head=records[0].paging_token;
+        state.recentCursor.backfill=records.at(-1).paging_token;
+      }
+      state.recentCursor.backfillDone=records.length<PAGE_LIMIT||records.some(r=>Date.parse(r.created_at)<cutoff);
+      forwardDone=true;await checkpoint();
+    }else{
+      while(pages<RECENT_MAX_PAGES){
+        const cursor=state.recentCursor.head;
+        const records=await readRecentPage(cursor,'asc');
+        if(records.length&&BigInt(records.at(-1).paging_token)<=BigInt(cursor))throw new Error('Recent forward cursor did not advance');
+        absorb(records);
+        if(records.length)state.recentCursor.head=records.at(-1).paging_token;
+        await checkpoint();
+        if(records.length<PAGE_LIMIT){forwardDone=true;break;}
+        await sleep(THROTTLE_MS);
+      }
+    }
+    while(forwardDone&&!state.recentCursor.backfillDone&&pages<RECENT_MAX_PAGES){
+      const cursor=state.recentCursor.backfill;
+      const records=await readRecentPage(cursor,'desc');
+      if(records.length&&BigInt(records.at(-1).paging_token)>=BigInt(cursor))throw new Error('Recent recovery cursor did not advance');
+      absorb(records);
+      if(records.length)state.recentCursor.backfill=records.at(-1).paging_token;
+      state.recentCursor.backfillDone=records.length<PAGE_LIMIT||records.some(r=>Date.parse(r.created_at)<cutoff);
+      await checkpoint();
+      if(!state.recentCursor.backfillDone)await sleep(THROTTLE_MS);
+    }
+    scan.complete=forwardDone&&state.recentCursor.backfillDone;
+    scan.completedAt=new Date().toISOString();
+    console.log(`Janela recente: ${Object.keys(state.recentEvents).length} eventos; ${pages} páginas nesta atualização; ${scan.complete?'sincronizada':'retomada pendente'}.`);
+  }finally{saveRecentCheckpoint();}
 }
 
 // Lê um caminho do Horizon com a mesma política de retry das páginas.
@@ -673,6 +712,9 @@ function pruneRecentEvents(now = Date.now()) {
   for (const [key, event] of Object.entries(state.recentEvents)) {
     if (Date.parse(event.createdAt) < cutoff) delete state.recentEvents[key];
   }
+  for(const [key,at] of Object.entries(state.recentCreatedAccountKeys||{})){
+    if(typeof at==='string'&&Date.parse(at)<cutoff)delete state.recentCreatedAccountKeys[key];
+  }
   // O cache de origem só serve à janela recente; fora dela vira peso morto.
   if (state.accountBirth) {
     const alive = new Set(Object.values(state.recentEvents).map(event => event.address));
@@ -684,6 +726,7 @@ function pruneRecentEvents(now = Date.now()) {
 
 function saveCheckpoint() {
   pruneRecentEvents();
+  saveRecentCheckpoint();
   mkdirSync(CK_PARTS, { recursive: true });
   const generation = `generation-${Date.now()}`;
   const generationDir = `${CK_PARTS}/${generation}`;

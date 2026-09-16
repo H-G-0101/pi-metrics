@@ -3,7 +3,8 @@ import {DatabaseSync} from 'node:sqlite';
 import {collectLive,liveRound,liveReceipt} from './src/live.mjs';
 const sql=new DatabaseSync(':memory:');
 let failCommit=false;
-const DB={prepare(query){return {query,args:[],bind(...args){this.args=args;return this;},async first(){return sql.prepare(this.query).get(...this.args);},async all(){return {results:sql.prepare(this.query).all(...this.args)};},async run(){const result=sql.prepare(this.query).run(...this.args);return {meta:{changes:Number(result.changes),rows_written:Number(result.changes)}};}};},async batch(statements){
+const queries=[];
+const DB={prepare(query){queries.push(query);return {query,args:[],bind(...args){this.args=args;return this;},async first(){return sql.prepare(this.query).get(...this.args);},async all(){return {results:sql.prepare(this.query).all(...this.args)};},async run(){const result=sql.prepare(this.query).run(...this.args);return {meta:{changes:Number(result.changes),rows_written:Number(result.changes)}};}};},async batch(statements){
   sql.exec('BEGIN');
   try{const results=[];for(const statement of statements){
     if(failCommit&&statement.query.startsWith('UPDATE live_control SET state')){failCommit=false;throw new Error('simulated failed commit');}
@@ -29,11 +30,12 @@ assert.equal(state().cursor,'201');assert.equal(state().backfill,null);
 failCommit=true;await collectLive({DB});
 assert.equal(state().cursor,'201','failure cannot skip a page');
 assert.equal(sql.prepare('SELECT COUNT(*) n FROM live_receipt_ops').get().n,2,'batch rollback includes trigger');
+assert.equal(state().metrics.events,1,'failed receipt batch does not change incremental counts');
 await collectLive({DB});assert.equal(state().cursor,'202');
 let snapshot=JSON.parse(sql.prepare('SELECT snapshot FROM live_control').get().snapshot);
 assert.equal(snapshot.events.length,2);assert.equal(snapshot.events[0].migrationNumber,null,'receipt does not imply round');
 assert.equal(snapshot.metrics24h.events,2);assert.equal(snapshot.metrics24h.pending,2);assert.equal(snapshot.metrics24h.amountPi,'0.7000000');
-sql.prepare('INSERT INTO sync_state(name,cursor) VALUES (?,?)').run('evidence:A',JSON.stringify({policyVersion:29,genesis:true,events:[{hash:'h'},{hash:'second'}]}));
+sql.prepare('INSERT INTO sync_state(name,cursor,updated_at) VALUES (?,?,?)').run('evidence:A',JSON.stringify({policyVersion:29,genesis:true,events:[{hash:'h'},{hash:'second'}]}),new Date().toISOString());
 await collectLive({DB});snapshot=JSON.parse(sql.prepare('SELECT snapshot FROM live_control').get().snapshot);
 assert.equal(snapshot.metrics24h.first,1);assert.equal(snapshot.metrics24h.second,1);assert.equal(snapshot.metrics24h.secondWallets,1);assert.equal(snapshot.metrics24h.pending,0);
 // Replay a committed page: no duplicate event or Pi.
@@ -80,4 +82,21 @@ globalThis.fetch=async()=>{const cursor=Number(state().cursor);const records=del
 await collectLive({DB});snapshot=JSON.parse(sql.prepare('SELECT snapshot FROM live_control').get().snapshot);
 assert.equal(snapshot.ranking.rows.length,20);assert.equal(snapshot.ranking.rows[0].address,'W00');assert.equal(snapshot.ranking.rows.at(-1).address,'W19');
 assert.equal(snapshot.metrics24h.events,28);
+const reference=()=>sql.prepare('SELECT COUNT(*) AS events,COUNT(DISTINCT address) AS wallets,COALESCE(SUM(migration_number=1),0) AS first,COALESCE(SUM(migration_number=2),0) AS second,COUNT(DISTINCT CASE WHEN migration_number=2 THEN address END) AS secondWallets,COALESCE(SUM(migration_number>2),0) AS later,COALESCE(SUM(migration_number IS NULL),0) AS pending,CAST(COALESCE(SUM(units),0) AS TEXT) AS units FROM live_receipts WHERE at>=?').get(state().metrics.from);
+const assertTotals=()=>{for(const [key,value] of Object.entries(reference()))assert.equal(state().metrics[key],value,'incremental '+key+' matches full reference');};
+assertTotals();
+const fullScans=()=>queries.filter(q=>q.startsWith('SELECT COUNT(*) AS events')).length;
+assert.equal(fullScans(),1,'the full counter scan happens only at bootstrap');
+globalThis.fetch=async()=>({ok:true,json:async()=>({_embedded:{records:[]}})});
+sql.prepare('UPDATE sync_state SET cursor=?,updated_at=? WHERE name=?').run(JSON.stringify({policyVersion:29,genesis:true,ambiguous:true,events:[{hash:'h'},{hash:'second'}]}),new Date(Date.now()+1000).toISOString(),'evidence:A');
+await collectLive({DB});assertTotals();assert.equal(state().metrics.second,0,'changed ambiguous evidence withdraws confirmation without changing event count');
+assert.equal(state().metrics.events,28);
+sql.prepare('UPDATE sync_state SET cursor=?,updated_at=? WHERE name=?').run(JSON.stringify({policyVersion:29,genesis:true,events:[{hash:'h'},{hash:'second'},{hash:'third'}]}),new Date(Date.now()+2000).toISOString(),'evidence:A');
+await collectLive({DB});assertTotals();assert.equal(state().metrics.first,1);assert.equal(state().metrics.secondWallets,1);assert.equal(state().metrics.later,1);
+const RealDate=Date;let clock=Date.now()+86400000+1000;
+globalThis.Date=class extends RealDate{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
+await collectLive({DB});assertTotals();assert.equal(state().metrics.events,0);assert.equal(state().metrics.units,'0');assert.equal(state().metrics.secondWallets,0);
+assert.equal(sql.prepare('SELECT COUNT(*) n FROM live_receipts').get().n,28,'expiration removes events only from rolling counters, never from stored history');
+assert.equal(fullScans(),1,'expiration and reclassification never rescan the entire window');
+globalThis.Date=RealDate;
 sql.close();console.log('PASS live: split pages, exact sums, rollback, restart, duplicate prevention, lease, quota, pending and verified evidence');

@@ -84,7 +84,7 @@ async function ensureD1(env){
 ${LIVE}
 export default {
   async scheduled(event,env,ctx){ctx.waitUntil(collectLive(env));},
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const p = url.pathname;
 
@@ -96,16 +96,22 @@ export default {
       if (!addresses.length) return json({ balances: {} });
       const pairs = await Promise.all(addresses.map(async address => {
         try {
-          const response = await fetch(HORIZON + "/accounts/" + address, { headers: { Accept: "application/json" } });
-          if (!response.ok) return [address, null];
+          const cache=typeof caches==='undefined'?null:caches.default;
+          const key=new Request(url.origin+'/__balance-cache/'+address);
+          const hit=cache?await cache.match(key):null;
+          if(hit){const saved=await hit.json();return [address,saved.value,saved.at];}
+          const response = await fetch(HORIZON + "/accounts/" + address, { signal:AbortSignal.timeout(10000),headers: { Accept: "application/json" } });
+          if (!response.ok) return [address, null,null];
           const account = await response.json();
           const native = (account.balances || []).find(balance => balance.asset_type === "native");
-          return [address, native ? Number(native.balance) : null];
+          const value=native?Number(native.balance):null,at=new Date().toISOString();
+          if(cache&&value!=null){const pending=cache.put(key,new Response(JSON.stringify({value,at}),{headers:{'content-type':'application/json','cache-control':'public, max-age=1800'}}));if(ctx?.waitUntil)ctx.waitUntil(pending);else await pending;}
+          return [address,value,at];
         } catch (error) {
           return [address, null];
         }
       }));
-      return json({ balances: Object.fromEntries(pairs), generatedAt: new Date().toISOString() });
+      return json({ balances: Object.fromEntries(pairs.map(([address,value])=>[address,value])), balanceUpdatedAt:Object.fromEntries(pairs.map(([address,value,at])=>[address,at||null])),generatedAt: new Date().toISOString() });
     }
 
     if (p.startsWith("/horizon/")) {

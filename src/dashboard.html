@@ -374,7 +374,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
     </div>
     <div class="ranking-wrap">
       <table>
-        <thead><tr><th>rank</th><th>wallet</th><th>migration</th><th>lockups</th><th>available balance</th><th style="text-align:right">Pi received</th></tr></thead>
+        <thead><tr><th>rank</th><th>wallet</th><th>migration</th><th>lockups</th><th title="Account balance is cached for up to 30 minutes; ranking uses Pi received.">available balance · 30m cache</th><th style="text-align:right">Pi received</th></tr></thead>
         <tbody id="rankingBody"></tbody>
       </table>
       <div class="empty" id="rankingEmpty">waiting for weekly data…</div>
@@ -403,7 +403,7 @@ const fmt=n=>n==null?'—':Number(n).toLocaleString('en-US');
 const fmtPi=(n,digits=2)=>n==null?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:digits});
 const shortAddress=a=>a&&a.length>16?a.slice(0,8)+'…'+a.slice(-6):a||'—';
 const balanceCache=new Map();
-const BALANCE_TTL=5*60*1000;
+const BALANCE_TTL=30*60*1000;
 function networkStatus(ok){
   const chip=$('networkChip');chip.className='chip '+(ok?'good':'bad');
   $('statusText').textContent=ok?'data online':'offline';
@@ -682,7 +682,10 @@ async function loadRankingBalances(rows){
       const response=await fetch('/wallet-balances?addresses='+encodeURIComponent(stale.join(',')),{cache:'no-store'});
       if(response.ok){
         const data=await response.json();
-        for(const address of stale)balanceCache.set(address,{value:data.balances?.[address],at:Date.now()});
+        for(const address of stale){
+          const value=data.balances?.[address];
+          if(value!=null)balanceCache.set(address,{value,at:Date.parse(data.balanceUpdatedAt?.[address])||Date.now()});
+        }
       }
     }catch(error){}
   }
@@ -691,6 +694,7 @@ async function loadRankingBalances(rows){
     document.querySelectorAll('[data-balance="'+address+'"]').forEach(cell=>{
       cell.textContent=(cell.closest('.mobile-wallet')?'Account balance: ':'')+(cached&&cached.value!=null?fmtPi(cached.value,7)+' Pi':'unavailable');
       cell.classList.remove('loading');
+      cell.title=cached?'Balance checked '+new Date(cached.at).toLocaleString('en-US')+' · cached up to 30 minutes':'Balance unavailable';
     });
   }
 }
@@ -911,6 +915,7 @@ function renderPriorityRanking(){
     : ($('rankingSource').value==='live'?'Waiting for frequent ranking · showing historical report · ':'')+data.meta+' · '+(data.updatedAt?new Date(data.updatedAt).toLocaleString('en-US'):'');
   const signature=JSON.stringify([!!useLive,data.rows]);
   if(signature!==lastRankingSignature){renderRanking(data.rows||[]);lastRankingSignature=signature;}
+  else loadRankingBalances(data.rows||[]);
 }
 $('rankingSource').addEventListener('change',renderPriorityRanking);
 function renderLiveMetrics(){

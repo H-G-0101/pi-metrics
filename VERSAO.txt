@@ -1,4 +1,4 @@
-PI Metrics — version 34 (priority migration collection and frequent Top 20)
+PI Metrics — version 35 (incremental counters, resumable recent history and balance cache)
 Package date: 2026-09-15
 
 Leia RELEASE-v30.md para instalação, coleta frequente, testes e limitações.
