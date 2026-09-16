@@ -2,6 +2,12 @@ name = "pi-metrics"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+LIVE_DAILY_WRITE_BUDGET = "30000"
+
 # KV pra guardar a estatística de migração.
 # Pegue o id em: Cloudflare > Storage & Databases > KV (id do namespace STATS)
 [[kv_namespaces]]

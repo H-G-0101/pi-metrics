@@ -52,7 +52,7 @@ const D1_BATCH_SIZE = 32;
 // Free tier do D1: 100.000 linhas escritas por dia (UTC). Cada carteira grava a
 // linha da tabela + a linha do índice idx_wallets_second_at, então o custo real
 // é ~2 linhas por carteira. 0 desliga o controle (plano pago).
-const D1_DAILY_ROW_BUDGET = Math.max(0, Number(process.env.D1_DAILY_ROW_BUDGET || 85000));
+const D1_DAILY_ROW_BUDGET = Math.max(0, Number(process.env.D1_DAILY_ROW_BUDGET || 50000));
 const D1_ROWS_PER_WALLET = Math.max(1, Number(process.env.D1_ROWS_PER_WALLET || 2));
 const CK = process.env.CHECKPOINT_FILE || './checkpoint.json';
 const CK_PARTS = `${CK}.parts`;

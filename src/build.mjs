@@ -15,6 +15,7 @@ const b64 = f => readFileSync(join(here, f), 'utf8')  // lê UTF-8
 const DASH = Buffer.from(readFileSync(join(here, 'dashboard.html'))).toString('base64');
 const INSP = Buffer.from(readFileSync(join(here, 'inspetor.html'))).toString('base64');
 const METHOD = Buffer.from(readFileSync(join(here, 'methodology.html'))).toString('base64');
+const LIVE = readFileSync(join(here,'live.mjs'),'utf8').replace(/^export /gm,'');
 
 const worker = `/**
  * Pi Mainnet — Worker único (sobe SÓ este arquivo no Cloudflare)
@@ -80,7 +81,9 @@ async function ensureD1(env){
   schemaReady = true;
 }
 
+${LIVE}
 export default {
+  async scheduled(event,env,ctx){ctx.waitUntil(collectLive(env));},
   async fetch(req, env) {
     const url = new URL(req.url);
     const p = url.pathname;
@@ -112,6 +115,13 @@ export default {
         headers: { "content-type": "application/json" } }));
     }
 
+    if (p === "/live") {
+      if(req.method!=="GET")return json({error:'Method not allowed'},405);
+      try{
+        const row=await env.DB.prepare('SELECT snapshot FROM live_control WHERE id=1').first();
+        return json(row?.snapshot?JSON.parse(row.snapshot):{version:30,events:[],checkedAt:null,error:'Waiting for first scheduled collection'});
+      }catch(error){return json({error:'Live collection not initialized; check the Cron Trigger and DB binding'},503);}
+    }
     if (p === "/d1/evidence") {
       if (!authorized(req,env)) return json({error:'Unauthorized'},401);
       try {

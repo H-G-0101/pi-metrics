@@ -235,6 +235,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
 .insight-table th,.insight-table td{padding:12px 8px}
 @media(max-width:700px){.insight-table th,.insight-table td{font-size:12px;padding:10px 5px}.insight-pi{font-size:12px;white-space:normal}}
 .evidence{min-width:160px}.evidence summary{cursor:pointer;color:#f0eaff;font-size:13px;list-style:none;padding:10px 12px;border-radius:10px;background:#253449;border:1px solid #4d647e}.evidence.confirmed summary{background:#173933;border-color:#377f70}.evidence.pending summary{background:#3a3020;border-color:#826a36}.evidence summary span{display:block;font-size:11px;color:#c7d3e2;margin-top:4px}.evidence-body{padding:12px;background:#0e1625;border:1px solid #334361;border-radius:10px;margin-top:8px;max-width:340px;overflow-wrap:anywhere;font-size:12px;line-height:1.7}.evidence-body p+p{border-top:1px solid #334361;padding-top:12px}.evidence-body a{color:#8fc7ff}.tranche{align-items:flex-start;max-width:440px}.tranche .lock{white-space:normal;line-height:1.6}.lock-detail{background:#0e1625;padding:12px;border-left:3px solid #ae81ed;border-radius:8px}.lifetime-grid .stat-value{font-size:clamp(25px,3.6vw,48px)!important;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.evidence summary:focus-visible{outline:2px solid #bb94ff}
+.live-panel{border-color:#346f6c}.live-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px}.live-receipt{display:grid;gap:10px;padding:18px;background:#152537;border:1px solid #334e65;border-radius:12px;overflow-wrap:anywhere}.live-receipt:nth-child(even){background:#101b2b}.live-receipt strong{font-size:22px;color:#6fe0bc}.live-receipt p{font-size:12px;color:#b7c5d8}.live-receipt a{color:#8fc7ff;font-size:12px}.live-confirmed{color:#70dfae}.live-pending{color:#e3c385}.live-receipt .mobile-copy{justify-self:start}@media(max-width:400px){.live-list{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -414,6 +415,9 @@ function ago(iso){
 }
 
 function setupRefinedLayout(){
+  const live=document.createElement('section');live.className='section panel live-panel';live.id='liveReceipts';
+  live.innerHTML='<div class="section-head"><div><div class="kicker">Independent collection</div><h2>Live migration receipts</h2><p>Latest 20 detected events · collection scheduled every minute</p></div><span id="liveStatus" class="chip">Connecting…</span></div><p id="liveFreshness" class="quality-note">Checking collector…</p><div id="liveList" class="live-list"></div><p class="panel-sub">Receipts appear before historical classification. Amounts may be partial while catching up. Lifetime totals and historical charts below update separately.</p>';
+  $('firstTotal').closest('section').before(live);
   const overview=$('firstTotal').closest('section');overview.id='recent';
   const lifetime=document.createElement('section');lifetime.className='section';lifetime.id='lifetime';
   lifetime.innerHTML='<div class="section-head"><div><div class="kicker">Cumulative wallet counts</div><h2>Lifetime migrations</h2><p>Persisted indexed wallets · not limited to 15 days</p></div></div><div class="lifetime-grid"></div><p class="quality-note" id="qualityNote">Checking data coverage…</p>';
@@ -893,6 +897,37 @@ async function fetchJson(path){
 $('lookBtn').addEventListener('click',lookup);
 $('addr').addEventListener('keydown',event=>{if(event.key==='Enter')lookup()});
 setupRefinedLayout();
+let liveLoading=false;
+async function loadLive(){
+  if(liveLoading||document.hidden)return;
+  liveLoading=true;
+  try{
+    const response=await fetch('/live',{cache:'no-store',signal:AbortSignal.timeout(10000)});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Live service unavailable');
+    const age=data.checkedAt?(Date.now()-Date.parse(data.checkedAt))/1000:Infinity;
+    const delayed=!!data.error||age>180;
+    $('liveStatus').textContent=delayed?'Delayed':data.backlog||data.backfilling?'Catching up':'Collector online';
+    $('liveStatus').className='chip '+(delayed?'bad':'good');
+    $('liveFreshness').textContent=(data.checkedAt?'Last successful collection: '+new Date(data.checkedAt).toLocaleString('en-US'):'No successful collection yet')+(data.error?' · '+data.error:'')+(data.backfilling?' · Recovering up to 24 hours before activation; partial amounts.':'')+(data.backlog?' · New operations are queued; partial amounts.':'');
+    const fragment=document.createDocumentFragment();
+    for(const event of data.events||[]){
+      const card=document.createElement('article');card.className='live-receipt';
+      const title=document.createElement('b');title.textContent=shortAddress(event.address);card.append(title);
+      const amount=document.createElement('strong');amount.textContent=event.amountPi+' Pi';card.append(amount);
+      const meta=document.createElement('p');meta.textContent=new Date(event.at).toLocaleString('en-US')+' · '+event.lockups+' lockups';card.append(meta);
+      const status=document.createElement('span');status.className=event.migrationNumber?'live-confirmed':'live-pending';status.textContent=event.migrationNumber?ordinal(event.migrationNumber)+' confirmed':'Received · classification pending';card.append(status);
+      const copy=document.createElement('button');copy.className='mobile-copy';copy.textContent='Copy wallet';copy.dataset.address=event.address;copy.onclick=()=>copyWallet(copy);card.append(copy);
+      if(/^[a-f0-9]{64}$/i.test(event.hash)){const link=document.createElement('a');link.href='/horizon/transactions/'+event.hash;link.target='_blank';link.rel='noopener';link.textContent='View transaction ↗';card.append(link);}
+      fragment.append(card);
+    }
+    if(!fragment.childNodes.length){const empty=document.createElement('p');empty.textContent='No receipts collected yet. This does not mean no migrations occurred.';fragment.append(empty);}
+    $('liveList').replaceChildren(fragment);
+  }catch(error){$('liveStatus').textContent='Unavailable';$('liveStatus').className='chip bad';$('liveFreshness').textContent=error.message+' · Previously displayed receipts may be stale.';}
+  finally{liveLoading=false;}
+}
+loadLive();setInterval(loadLive,20000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadLive();});
 loadMigration();loadSupply();
 setInterval(loadMigration,CONFIG.MIGRATION_POLL_MS);
 </script>

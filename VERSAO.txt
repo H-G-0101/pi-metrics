@@ -1,7 +1,7 @@
-PI Metrics — version 29 (recipient validation, claim windows and exact sums)
+PI Metrics — version 30 (independent frequent migration receipt collection)
 Package date: 2026-09-15
 
-Leia RELEASE-v29.md para regras atuais, instalação, testes e limitações.
+Leia RELEASE-v30.md para instalação, coleta frequente, testes e limitações.
 O histórico de funcionalidades abaixo foi herdado das versões anteriores;
 em caso de diferença, RELEASE-v27.md descreve o comportamento atual.
 
