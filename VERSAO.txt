@@ -1,4 +1,4 @@
-PI Metrics — version 31 (frequent numerical metrics in Migration overview)
+PI Metrics — version 33 (compact K/M counters without prefix symbols; partial coverage remains labeled)
 Package date: 2026-09-15
 
 Leia RELEASE-v30.md para instalação, coleta frequente, testes e limitações.

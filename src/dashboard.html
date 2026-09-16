@@ -482,10 +482,9 @@ function updateRefinedStatus(stats){
 }
 function compactCardNumbers(){
   document.querySelectorAll('.stat-value,.largest-amount').forEach(el=>{
-    if(el.id==='firstTotal'||el.id==='secondTotal')return;
-    const raw=el.textContent;const match=raw.match(/^([\d,.]+)( Pi)?$/);if(!match)return;
-    const value=Number(match[1].replaceAll(',',''));el.title=raw;
-    if(value>=1000)el.textContent=new Intl.NumberFormat('en-US',{notation:'compact',minimumFractionDigits:2,maximumFractionDigits:2}).format(value)+(match[2]||'');
+    const raw=el.textContent;const match=raw.match(/^(≥ )?([\d,.]+)( Pi)?$/);if(!match)return;
+    const value=Number(match[2].replaceAll(',',''));el.title=raw;
+    if(value>=1000)el.textContent=(match[1]||'')+new Intl.NumberFormat('en-US',{notation:'compact',minimumFractionDigits:2,maximumFractionDigits:2}).format(value)+(match[3]||'');
     el.setAttribute('aria-label',raw);
   });
 }
@@ -904,9 +903,10 @@ let liveLoading=false,lastLiveMetrics=null;
 function renderLiveMetrics(){
   const m=lastLiveMetrics;if(!m)return;
   for(const [id,value] of [['liveCount',m.events],['liveFirst',m.first],['livePending',m.pending],['liveLater',m.later],['second24h',m.secondWallets],['liveVolume',m.amountPi]]){
-    const el=$(id);el.textContent=(m.complete?'':'≥ ')+(id==='liveVolume'?fmtPi(value,7)+' Pi':fmt(value));
+    const el=$(id);el.textContent=id==='liveVolume'?fmtPi(value,7)+' Pi':fmt(value);
     el.closest('article').querySelector('.stat-sub').textContent=m.complete?'Frequent collection · past 24 hours':'Partial coverage · observed so far';
   }
+  compactCardNumbers();
 }
 async function loadLive(){
   if(liveLoading||document.hidden)return;
