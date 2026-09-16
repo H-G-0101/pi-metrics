@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#090b14">
+<title>Pi Migration Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark}
+.origin{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin:0 0 16px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,rgba(139,92,246,.10),rgba(139,92,246,.02))}
+.origin .l{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.origin .addr{font-family:var(--mono);font-size:13px;word-break:break-all;color:var(--text)}
+.origin .when{font-family:var(--mono);font-size:13px;color:var(--purple)}
+.origin .sep{width:1px;height:26px;background:var(--line)}
+.section-nav{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px}.section-nav a{color:#cdd7ef;text-decoration:none;border:1px solid #34415d;border-radius:99px;padding:9px 16px;font-size:12px}.section-nav a:hover{background:#25304a}
+.lifetime-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.lifetime-grid .stat{padding:28px;min-height:175px}.lifetime-grid .stat-value{font-size:clamp(30px,5vw,54px)}
+.quality-note{padding:12px 16px;margin:16px 0;color:#f2c77a;border:1px solid #615030;border-radius:12px;background:#211d18;font-size:12px}.quality-note.ready{color:#69deb0;background:#12231e;border-color:#28543f}
+.metric-info{margin-top:10px;font-size:11px;color:#aab8d0}.metric-info summary{cursor:pointer;width:fit-content}.metric-info p{padding-top:7px;line-height:1.6}
+.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.health-grid div{padding:18px;background:#171e2f;border-radius:12px}.health-grid dt{font-size:11px;color:#9caecb}.health-grid dd{margin:9px 0 0;font-size:13px;overflow-wrap:anywhere}
+.mobile-wallets{display:none}.mobile-wallet{padding:18px;border-radius:14px;margin:12px 0;border:1px solid #34415d;background:#192237}.mobile-wallet:nth-child(even){background:#101724}.mobile-wallet summary{cursor:pointer;line-height:2}.mobile-wallet p{font-size:12px;margin-top:12px;overflow-wrap:anywhere}.mobile-wallet .tranche{white-space:normal;margin-top:8px}.mobile-wallet .tranches{display:block}
+@media(max-width:700px){.lifetime-grid,.health-grid{grid-template-columns:1fr}.mobile-wallets{display:block}.ranking-wrap:has(#rankingBody){display:none}.stat-value{font-size:25px!important}.lifetime-grid .stat-value{font-size:42px!important}}
+:root{
+  --bg:#090b14;--panel:#111522;--panel2:#171c2c;--line:#252c40;
+  --text:#f3f4f8;--muted:#8e97ad;--purple:#b36cff;--purple2:#7c3aed;
+  --green:#42d392;--amber:#f2b84b;--red:#ef6b7b;--blue:#58a6ff;
+  --mono:'JetBrains Mono',monospace;--sans:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{
+  min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--sans);
+  line-height:1.45;
+  background-image:
+    radial-gradient(circle at 80% -10%,rgba(124,58,237,.18),transparent 32%),
+    radial-gradient(circle at 0% 35%,rgba(88,166,255,.07),transparent 25%);
+}
+.shell{width:min(1240px,calc(100% - 32px));margin:auto;padding:24px 0 48px}
+header{
+  display:flex;align-items:center;justify-content:space-between;gap:20px;
+  padding:8px 0 24px;border-bottom:1px solid var(--line);margin-bottom:28px;
+}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{
+  width:48px;height:48px;display:grid;place-items:center;border-radius:14px;
+  color:#0b0711;background:var(--purple);font-size:29px;font-weight:800;
+  box-shadow:0 10px 30px rgba(179,108,255,.2);
+}
+.brand h1{font-size:19px;letter-spacing:-.02em}
+.brand p{color:var(--muted);font-size:12px;margin-top:2px}
+.status-line{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.chip{
+  display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border-radius:999px;
+  border:1px solid var(--line);background:var(--panel);color:var(--muted);
+  font:600 11px var(--mono);
+}
+.chip.good{color:var(--green);border-color:rgba(66,211,146,.3);background:rgba(66,211,146,.07)}
+.chip.warn{color:var(--amber);border-color:rgba(242,184,75,.3);background:rgba(242,184,75,.07)}
+.chip.bad{color:var(--red)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 9px currentColor}
+
+.hero{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,.65fr);gap:16px;margin-bottom:30px}
+.hero-main,.sync-card,.panel,.stat,.network-card,.lookup{
+  background:var(--panel);border:1px solid var(--line);border-radius:18px;
+}
+.hero-main{
+  min-height:210px;padding:30px;position:relative;overflow:hidden;
+  background:linear-gradient(135deg,#17132a 0%,#111522 62%);
+}
+.hero-main:after{
+  content:'π';position:absolute;right:24px;bottom:-54px;color:rgba(179,108,255,.07);
+  font-size:230px;font-weight:800;line-height:1;pointer-events:none;
+}
+.kicker{font:600 11px var(--mono);color:var(--purple);letter-spacing:.12em;text-transform:uppercase}
+.hero-main h2{font-size:clamp(28px,5vw,50px);line-height:1.04;letter-spacing:-.045em;margin:13px 0 12px;max-width:700px}
+.hero-main p{color:var(--muted);font-size:14px;max-width:650px}
+.hero-meta{display:flex;gap:16px;flex-wrap:wrap;margin-top:22px;color:var(--muted);font:500 11px var(--mono)}
+.sync-card{padding:22px;display:flex;flex-direction:column;justify-content:center}
+.sync-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:18px}
+.sync-title{font-size:13px;font-weight:700}
+.sync-card .big{font:600 clamp(25px,4vw,36px) var(--mono)}
+.sync-card .label{color:var(--muted);font-size:12px;margin-top:5px}
+.progress{height:9px;border-radius:999px;background:#090b14;overflow:hidden;margin:18px 0 10px}
+.progress span{display:block;width:100%;height:100%;background:linear-gradient(90deg,var(--purple2),var(--purple))}
+.progress.working span{width:55%;animation:scan 2.2s ease-in-out infinite}
+@keyframes scan{0%,100%{transform:translateX(-85%)}50%{transform:translateX(155%)}}
+.sync-meta{font:500 10px var(--mono);color:var(--muted);word-break:break-word}
+
+.section{margin-top:30px}
+.section-head{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-bottom:13px}
+.section-head h2{font-size:17px;letter-spacing:-.02em}
+.section-head p{color:var(--muted);font-size:12px;margin-top:3px}
+.updated{color:var(--muted);font:500 10px var(--mono);text-align:right}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.stat{padding:19px;min-height:126px;position:relative;overflow:hidden}
+.stat.primary{background:linear-gradient(150deg,rgba(124,58,237,.24),var(--panel));border-color:rgba(179,108,255,.38)}
+.stat.green{background:linear-gradient(150deg,rgba(66,211,146,.11),var(--panel))}
+.stat.blue{background:linear-gradient(150deg,rgba(88,166,255,.1),var(--panel))}
+.stat.amber{background:linear-gradient(150deg,rgba(242,184,75,.1),var(--panel))}
+.stat-label{font-size:11px;color:var(--muted);font-weight:600;min-height:31px}
+.stat-value{font:600 clamp(23px,3vw,32px) var(--mono);letter-spacing:-.04em;margin-top:8px;white-space:nowrap}
+.stat.primary .stat-value{color:var(--purple)}
+.stat.green .stat-value{color:var(--green)}
+.stat-sub{font-size:10px;color:var(--muted);margin-top:6px}
+
+.two-col{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(360px,.75fr);gap:14px}
+.panel{padding:22px;min-width:0}
+.panel-title{font-size:14px;font-weight:700}
+.panel-sub{color:var(--muted);font-size:11px;margin-top:3px}
+.weekly-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
+.mini{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:13px}
+.mini b{display:block;font:600 17px var(--mono)}
+.mini span{display:block;color:var(--muted);font-size:10px;margin-top:4px}
+.chart{height:170px;display:flex;gap:7px;align-items:flex-end;margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+.day{flex:1;height:130px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;min-width:0}
+.bar-pair{height:105px;width:100%;display:flex;align-items:flex-end;justify-content:center;gap:2px}
+.bar{width:min(38%,13px);border-radius:4px 4px 1px 1px;min-height:1px}
+.bar.first{background:var(--blue)}
+.bar.second{background:var(--purple)}
+.bar.pending{background:var(--muted)}
+.day-label{font:500 9px var(--mono);color:var(--muted)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:10px;margin-top:8px}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
+.insight-table{min-width:0;width:100%;table-layout:fixed;margin-top:15px}
+.insight-table th:last-child,.insight-table td:last-child{text-align:right}
+.insight-table td{font:500 12px var(--mono);overflow-wrap:anywhere}
+.insight-table td:first-child{font-family:var(--sans);color:var(--muted)}
+.insight-pi{display:block;color:var(--text);font-weight:600}
+.insight-count{display:block;color:var(--muted);font-size:9px;margin-top:2px}
+.share-grid,.largest-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:16px}
+.share-card,.largest-card{background:var(--panel2);border:1px solid var(--line);border-radius:13px;padding:14px;min-width:0}
+.share-card b{display:block;font:600 23px var(--mono);color:var(--green)}
+.share-card span,.largest-label{display:block;color:var(--muted);font-size:10px;margin-top:4px}
+.largest-card .largest-amount{font:600 18px var(--mono);margin:7px 0;color:var(--purple)}
+.largest-wallet{display:flex;align-items:center;gap:7px;font:500 10px var(--mono);white-space:nowrap}
+.largest-meta{color:var(--muted);font-size:9px;margin-top:7px}
+.insight-empty{color:var(--muted);font-size:11px;padding:22px 0;text-align:center}
+
+.ranking-wrap{overflow:auto;margin-top:15px}
+table{width:100%;border-collapse:collapse;min-width:850px}
+th{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+td{padding:11px 10px;border-bottom:1px solid rgba(37,44,64,.7);font-size:12px}
+tbody tr:last-child td{border-bottom:0}
+.wallet-row td{border-bottom:0;transition:background .18s}
+.wallet-row.tone-light td,.tranche-row.tone-light td{background:rgba(255,255,255,.038)}
+.wallet-row.tone-dark td,.tranche-row.tone-dark td{background:rgba(4,7,14,.34)}
+.wallet-row.tone-light td:first-child,.tranche-row.tone-light td:first-child{border-left:3px solid rgba(179,108,255,.72)}
+.wallet-row.tone-dark td:first-child,.tranche-row.tone-dark td:first-child{border-left:3px solid rgba(88,166,255,.42)}
+.wallet-row:hover td,.wallet-row:hover+.tranche-row td{background:rgba(179,108,255,.075)}
+.rank{color:var(--purple);font:600 11px var(--mono)}
+.address{font:500 11px var(--mono);white-space:nowrap}
+.address-cell{display:inline-flex;align-items:center;gap:7px}
+.copy-wallet{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--muted);cursor:pointer;transition:.18s}
+.copy-wallet:hover{color:var(--text);border-color:var(--purple);background:rgba(174,100,255,.09)}
+.copy-wallet:focus-visible{outline:2px solid var(--purple);outline-offset:2px}
+.copy-wallet.copied{width:68px;color:var(--green);border-color:rgba(66,211,146,.55);background:rgba(66,211,146,.08)}
+.copy-wallet svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.copy-label{display:none;font:600 9px var(--mono);pointer-events:none}
+.copy-wallet.copied svg{display:none}
+.copy-wallet.copied .copy-label{display:inline}
+.type{display:inline-flex;padding:3px 8px;border-radius:999px;background:var(--panel2);color:var(--muted);font:600 10px var(--mono)}
+.type.second{color:var(--green);background:rgba(66,211,146,.08)}
+.amount{text-align:right;font:600 11px var(--mono);white-space:nowrap}
+.current-balance{font:600 11px var(--mono);white-space:nowrap;color:var(--blue)}
+.current-balance.loading{color:var(--muted);font-size:9px}
+.tranche-row td{padding:0 10px 13px 68px;border-bottom:2px solid rgba(50,59,82,.85)}
+.tranches{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-top:9px}
+.tranches-label{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.07em;margin-right:2px}
+.tranche{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font:500 9px var(--mono);white-space:nowrap}
+.tranche b{color:var(--text);font-weight:600}.tranche .lock{color:var(--amber)}
+.tranche.unlocked .lock{color:var(--green)}
+.empty{padding:28px 0;color:var(--muted);font-size:12px;text-align:center}
+
+.network-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.network-card{padding:16px}
+.network-card .n{font:600 19px var(--mono);margin-top:7px}
+.network-card .l{color:var(--muted);font-size:10px}
+.network-card .s{color:var(--muted);font:500 9px var(--mono);margin-top:5px}
+
+.supply{margin-top:14px}
+.supply[hidden]{display:none}
+.stack{height:10px;display:flex;background:#090b14;border-radius:99px;overflow:hidden;margin:14px 0 8px}
+.stack i{height:100%}
+
+.lookup{padding:23px;margin-top:30px}
+.lookup h2{font-size:16px}
+.lookup p{color:var(--muted);font-size:12px;margin:5px 0 15px}
+.input-row{display:flex;gap:9px}
+input{
+  flex:1;min-width:0;background:#0b0e17;border:1px solid var(--line);border-radius:11px;
+  color:var(--text);padding:13px 14px;font:500 12px var(--mono);
+}
+input:focus{outline:2px solid var(--purple2);border-color:transparent}
+button{border:0;border-radius:11px;background:var(--purple);color:#13091d;padding:0 20px;font-weight:800;cursor:pointer}
+button:hover{filter:brightness(1.08)}
+.error{display:none;color:var(--red);font-size:11px;margin-top:10px}
+.error.show{display:block}
+.result{display:none;margin-top:17px;border-top:1px solid var(--line);padding-top:8px}
+.result.show{display:block}
+.result-row{display:flex;justify-content:space-between;gap:20px;padding:10px 0;border-bottom:1px solid var(--line);font:500 12px var(--mono)}
+.result-row span:first-child{color:var(--muted)}
+
+.method{margin-top:14px;padding:14px 16px;border:1px dashed var(--line);border-radius:13px;color:var(--muted);font-size:11px}
+.method b{color:var(--text)}
+footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font:500 10px var(--mono)}
+
+@media(max-width:1000px){
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .two-col{grid-template-columns:1fr}
+  .network-grid{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:700px){
+  .shell{width:min(100% - 20px,1240px);padding-top:12px}
+  header{align-items:flex-start}.status-line{justify-content:flex-start}
+  .hero{grid-template-columns:1fr}.hero-main{padding:23px;min-height:190px}
+  .stats{grid-template-columns:1fr 1fr}.stat{padding:16px;min-height:116px}
+  .network-grid{grid-template-columns:repeat(2,1fr)}
+  .weekly-summary{grid-template-columns:1fr}
+  .share-grid,.largest-grid{grid-template-columns:1fr}
+  .input-row{flex-direction:column}button{padding:13px}
+}
+@media(max-width:430px){
+  header{display:block}.status-line{margin-top:14px}
+  .stats{grid-template-columns:1fr}
+  .hero-main h2{font-size:31px}
+  .chart{gap:3px}.day-label{font-size:8px}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* v27: readable supporting text and keyboard/touch chart inspection. */
+.stat-sub,.panel-sub,.updated,.insight-count,.day-label{font-size:12px!important;line-height:1.5}
+.chart-details{font-size:13px;color:#b9c8df;line-height:1.6;min-height:42px}
+.day{cursor:pointer}.day:focus-visible{outline:2px solid #b685ff;outline-offset:3px}
+.insight-table th,.insight-table td{padding:12px 8px}
+@media(max-width:700px){.insight-table th,.insight-table td{font-size:12px;padding:10px 5px}.insight-pi{font-size:12px;white-space:normal}}
+.evidence{min-width:160px}.evidence summary{cursor:pointer;color:#f0eaff;font-size:13px;list-style:none;padding:10px 12px;border-radius:10px;background:#253449;border:1px solid #4d647e}.evidence.confirmed summary{background:#173933;border-color:#377f70}.evidence.pending summary{background:#3a3020;border-color:#826a36}.evidence summary span{display:block;font-size:11px;color:#c7d3e2;margin-top:4px}.evidence-body{padding:12px;background:#0e1625;border:1px solid #334361;border-radius:10px;margin-top:8px;max-width:340px;overflow-wrap:anywhere;font-size:12px;line-height:1.7}.evidence-body p+p{border-top:1px solid #334361;padding-top:12px}.evidence-body a{color:#8fc7ff}.tranche{align-items:flex-start;max-width:440px}.tranche .lock{white-space:normal;line-height:1.6}.lock-detail{background:#0e1625;padding:12px;border-left:3px solid #ae81ed;border-radius:8px}.lifetime-grid .stat-value{font-size:clamp(25px,3.6vw,48px)!important;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.evidence summary:focus-visible{outline:2px solid #bb94ff}
+.live-panel{border-color:#346f6c}.live-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px}.live-receipt{display:grid;gap:10px;padding:18px;background:#152537;border:1px solid #334e65;border-radius:12px;overflow-wrap:anywhere}.live-receipt:nth-child(even){background:#101b2b}.live-receipt strong{font-size:22px;color:#6fe0bc}.live-receipt p{font-size:12px;color:#b7c5d8}.live-receipt a{color:#8fc7ff;font-size:12px}.live-confirmed{color:#70dfae}.live-pending{color:#e3c385}.live-receipt .mobile-copy{justify-self:start}@media(max-width:400px){.live-list{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main class="shell">
+  <header>
+    <div class="brand">
+      <div class="logo" id="glyph">π</div>
+      <div><h1>Pi Migration Monitor</h1><p>Public, verifiable Pi Mainnet data</p></div>
+    </div>
+    <div class="status-line">
+      <span class="chip" id="networkChip"><i class="dot"></i><span id="statusText">connecting</span></span>
+      <span class="chip" id="indexChip">loading index</span>
+      <span class="chip" id="storageChip">checking D1</span>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-main">
+      <div class="kicker">On-chain migrations</div>
+      <h2>First and second migrations in one dashboard.</h2>
+      <p>Track how many wallets received migrations, how much Pi was distributed over the week, and the largest allocations.</p>
+      <div class="hero-meta">
+        <span>migration wallet: GABT…GC5G</span>
+        <span>source: Horizon Mainnet</span>
+        <span>rolling window: 7 days</span>
+        <span id="coverageMeta">index coverage: checking…</span>
+      </div>
+    </div>
+    <aside class="sync-card">
+      <div class="sync-top"><span class="sync-title">Index status</span><span class="chip" id="syncLabel">—</span></div>
+      <div class="big" id="indexedWallets">—</div>
+      <div class="label">migration wallets identified</div>
+      <div class="progress working" id="syncProgress"><span></span></div>
+      <div class="sync-meta" id="syncMeta">waiting for statistics…</div>
+    </aside>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <div><h2>Migration overview</h2><p>Each wallet is counted once per migration round.</p></div>
+      <div class="updated" id="migStamp">—</div>
+    </div>
+    <div class="stats">
+      <article class="stat blue"><div class="stat-label">Wallets with a 1st migration</div><div class="stat-value" id="firstTotal">—</div><div class="stat-sub">first migration hash</div></article>
+      <article class="stat primary"><div class="stat-label">Wallets with a 2nd migration</div><div class="stat-value" id="secondTotal">—</div><div class="stat-sub">second distinct hash</div></article>
+      <article class="stat green"><div class="stat-label">New 2nd migrations · 24h</div><div class="stat-value" id="second24h">—</div><div class="stat-sub">past 24 hours</div></article>
+      <article class="stat green"><div class="stat-label">New 2nd migrations · 7 days</div><div class="stat-value" id="second7d">—</div><div class="stat-sub">rolling seven-day window</div></article>
+      <article class="stat primary"><div class="stat-label">Pi distributed · 7 days</div><div class="stat-value" id="weeklyPi">—</div><div class="stat-sub">sum of all lockups</div></article>
+      <article class="stat blue"><div class="stat-label">Average 1st migration · 15 days</div><div class="stat-value" id="averageFirst">—</div><div class="stat-sub" id="averageFirstSub">all lockups combined per event</div></article>
+      <article class="stat primary"><div class="stat-label">Average 2nd migration · 15 days</div><div class="stat-value" id="averageSecond">—</div><div class="stat-sub" id="averageSecondSub">all lockups combined per event</div></article>
+      <article class="stat blue"><div class="stat-label">1st migration volume · 15 days</div><div class="stat-value" id="volumeFirst">—</div><div class="stat-sub">sum of classified 1st migrations</div></article>
+      <article class="stat primary"><div class="stat-label">2nd migration volume · 15 days</div><div class="stat-value" id="volumeSecond">—</div><div class="stat-sub">sum of classified 2nd migrations</div></article>
+      <article class="stat blue"><div class="stat-label">Median 1st migration · 15 days</div><div class="stat-value" id="medianFirst">—</div><div class="stat-sub">middle classified event value</div></article>
+      <article class="stat primary"><div class="stat-label">Median 2nd migration · 15 days</div><div class="stat-value" id="medianSecond">—</div><div class="stat-sub">middle classified event value</div></article>
+      <article class="stat green"><div class="stat-label">Confirmed classification · 15 days</div><div class="stat-value" id="classificationCoverage">—</div><div class="stat-sub" id="classificationCoverageSub">classified recent events</div></article>
+      <article class="stat"><div class="stat-label">Wallets receiving Pi · 7 days</div><div class="stat-value" id="weeklyWallets">—</div><div class="stat-sub">1st or 2nd migration</div></article>
+      <article class="stat amber"><div class="stat-label">Only 1st migration detected</div><div class="stat-value" id="onlyFirst">—</div><div class="stat-sub">no second migration detected yet</div></article>
+      <article class="stat"><div class="stat-label">Claimable balances analyzed</div><div class="stat-value" id="claimableCount">—</div><div class="stat-sub">short- and long-term lockups</div></article>
+    </div>
+  </section>
+
+  <section class="section two-col">
+    <article class="panel">
+      <div class="panel-title">Activity over the last 14 days</div>
+      <div class="panel-sub">Daily count of identified migrations · UTC</div>
+      <div class="chart" id="dailyChart"><div class="empty">waiting for the index…</div></div>
+      <div class="legend"><span><i style="background:var(--blue)"></i>1st migration</span><span><i style="background:var(--purple)"></i>2nd migration</span><span><i style="background:var(--muted)"></i>pending classification</span></div>
+    </article>
+    <article class="panel">
+      <div class="panel-title">Weekly overview</div>
+      <div class="panel-sub" id="weeklyRange">Last seven days</div>
+      <div class="weekly-summary">
+        <div class="mini"><b id="weeklyFirst">—</b><span>1st migration events</span></div>
+        <div class="mini"><b id="weeklySecond">—</b><span>2nd migration events</span></div>
+        <div class="mini"><b id="weeklyPending">—</b><span>pending classification</span></div>
+        <div class="mini"><b id="latestSecond">—</b><span>latest 2nd migration</span></div>
+      </div>
+      <div class="method"><b>How it is calculated:</b> claimable balances with the same recipient and transaction hash are combined into one migration event. A second distinct hash identifies the second migration.</div>
+    </article>
+  </section>
+
+  <section class="section two-col">
+    <article class="panel">
+      <div class="panel-title">Daily migration volume</div>
+      <div class="panel-sub">Pi received through classified migrations over the last 14 days · UTC</div>
+      <div class="chart" id="dailyVolumeChart"><div class="empty">waiting for the updated crawler…</div></div>
+      <div class="legend"><span><i style="background:var(--blue)"></i>1st migration Pi</span><span><i style="background:var(--purple)"></i>2nd migration Pi</span></div>
+    </article>
+    <article class="panel">
+      <div class="panel-title">Second migration share</div>
+      <div class="panel-sub">Share among classified events in the last 15 days</div>
+      <div class="share-grid">
+        <div class="share-card"><b id="secondEventShare">—</b><span>share of migration events</span></div>
+        <div class="share-card"><b id="secondVolumeShare">—</b><span>share of migrated Pi</span></div>
+      </div>
+      <div class="method" id="secondShareMeta">Waiting for classified migrations…</div>
+    </article>
+  </section>
+
+  <section class="section two-col">
+    <article class="panel">
+      <div class="panel-title">Lockup distribution</div>
+      <div class="panel-sub">Pi and lockups by original lock period · last 15 days</div>
+      <div class="ranking-wrap">
+        <table class="insight-table">
+          <thead><tr><th>lock period</th><th>1st migration</th><th>2nd migration</th></tr></thead>
+          <tbody id="lockupDistributionBody"></tbody>
+        </table>
+        <div class="insight-empty" id="lockupDistributionEmpty">waiting for the updated crawler…</div>
+      </div>
+    </article>
+    <article class="panel">
+      <div class="panel-title">Migration size distribution</div>
+      <div class="panel-sub">Number of classified migration events by total Pi · last 15 days</div>
+      <div class="ranking-wrap">
+        <table class="insight-table">
+          <thead><tr><th>migration size</th><th>1st migration</th><th>2nd migration</th></tr></thead>
+          <tbody id="sizeDistributionBody"></tbody>
+        </table>
+        <div class="insight-empty" id="sizeDistributionEmpty">waiting for the updated crawler…</div>
+      </div>
+    </article>
+  </section>
+
+  <section class="section panel">
+    <div class="panel-title">Largest migrations in the last 24 hours</div>
+    <div class="panel-sub">Largest classified first and second migration events, with all lockups combined</div>
+    <div class="largest-grid" id="largest24h"><div class="insight-empty">waiting for the updated crawler…</div></div>
+  </section>
+
+  <section class="section panel">
+    <div class="section-head">
+      <div><h2>Largest migrations in the last 7 days</h2><p>Top 20 by Pi received. New receipts appear before their migration round is confirmed.</p>
+      <label>Data source <select id="rankingSource" aria-label="Top 20 data source"><option value="live">Frequent collection</option><option value="historical">Historical report</option></select></label></div>
+      <div class="updated" id="rankingMeta">—</div>
+    </div>
+    <div class="ranking-wrap">
+      <table>
+        <thead><tr><th>rank</th><th>wallet</th><th>migration</th><th>lockups</th><th title="Account balance is cached for up to 30 minutes; ranking uses Pi received.">available balance · 30m cache</th><th style="text-align:right">Pi received</th></tr></thead>
+        <tbody id="rankingBody"></tbody>
+      </table>
+      <div class="empty" id="rankingEmpty">waiting for weekly data…</div>
+    </div>
+  </section>
+
+
+  <section class="panel supply" id="supplySection" hidden>
+    <div class="panel-title">Migrated supply</div><div id="supplyBody"></div>
+  </section>
+
+  <section class="lookup">
+    <h2>Check a wallet migration</h2>
+    <p>Paste a public Mainnet address to see whether it received a first or second migration, and what is still locked.</p>
+    <div class="input-row"><input id="addr" placeholder="GABC...XYZ" autocomplete="off" spellcheck="false"><button id="lookBtn">Look up</button></div>
+    <div class="error" id="lookErr"></div><div class="result" id="lookResult"></div>
+  </section>
+
+  <footer><span>Pi Migration Monitor</span><span id="footerEndpoint">migration data only</span><span>public on-chain data</span></footer>
+</main>
+
+<script>
+const CONFIG={HORIZON:'/horizon',MIGRATION_URL:'/stats',SUPPLY_URL:'',MIGRATION_POLL_MS:300000};
+const $=id=>document.getElementById(id);
+const fmt=n=>n==null?'—':Number(n).toLocaleString('en-US');
+const fmtPi=(n,digits=2)=>n==null?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:digits});
+const shortAddress=a=>a&&a.length>16?a.slice(0,8)+'…'+a.slice(-6):a||'—';
+const balanceCache=new Map();
+const BALANCE_TTL=30*60*1000;
+function networkStatus(ok){
+  const chip=$('networkChip');chip.className='chip '+(ok?'good':'bad');
+  $('statusText').textContent=ok?'data online':'offline';
+}
+function ago(iso){
+  const s=Math.max(0,(Date.now()-Date.parse(iso))/1000);
+  if(s<60)return Math.floor(s)+'s';
+  if(s<3600)return Math.floor(s/60)+'min';
+  return Math.floor(s/3600)+'h';
+}
+
+function setupRefinedLayout(){
+  const overview=$('firstTotal').closest('section');overview.id='recent';
+  const lifetime=document.createElement('section');lifetime.className='section';lifetime.id='lifetime';
+  lifetime.innerHTML='<div class="section-head"><div><div class="kicker">Cumulative wallet counts</div><h2>Lifetime migrations</h2><p>Persisted indexed wallets · not limited to 15 days</p></div></div><div class="lifetime-grid"></div><p class="quality-note" id="qualityNote">Checking data coverage…</p>';
+  overview.before(lifetime);
+  for(const id of ['firstTotal','secondTotal'])lifetime.querySelector('.lifetime-grid').append($(id).closest('article'));
+  overview.querySelector('h2').textContent='Migration overview';
+  const live=document.createElement('div');live.innerHTML='<span id="liveStatus" class="chip">Connecting…</span><p id="liveFreshness" class="quality-note">Checking frequent collection…</p>';
+  overview.querySelector('.stats').before(live);
+  for(const [id,label] of [['liveCount','Migration events · 24h'],['liveFirst','Confirmed 1st events · 24h'],['livePending','Pending classification · 24h'],['liveLater','Confirmed later events · 24h'],['liveVolume','Pi received · 24h']]){
+    const card=document.createElement('article');card.className='stat blue';card.innerHTML='<div class="stat-label">'+label+'</div><div class="stat-value" id="'+id+'">—</div><div class="stat-sub">Frequent collection · waiting</div>';overview.querySelector('.stats').prepend(card);
+  }
+  overview.querySelector('.section-head p').textContent='Rolling windows · each metric shows its own period';
+  const origin=document.createElement('div');origin.className='origin';
+  origin.innerHTML='<div><div class="l">Migration wallet</div><div class="addr" id="originWallet">—</div></div>'
+    +'<div class="sep" aria-hidden="true"></div>'
+    +'<div><div class="l">Last wallet migrated</div><div class="when" id="originLast">—</div></div>'
+    +'<button class="copy-btn" id="originCopy" type="button" title="Copy wallet" aria-label="Copy migration wallet"></button>';
+  overview.querySelector('.section-head').after(origin);
+  $('originCopy').addEventListener('click',event=>copyWallet(event.currentTarget));
+  const nav=document.createElement('nav');nav.className='section-nav';nav.setAttribute('aria-label','Dashboard sections');nav.innerHTML='<a href="#lifetime">Lifetime</a><a href="#recent">Recent activity</a><a href="#health">Data health</a><a href="/methodology">Methodology ↗</a>';
+  document.querySelector('header').after(nav);
+  for(const [id,text] of [
+    ['averageFirst','Total Pi divided by classified first migration events. Large migrations can raise the average. Lockups for the same wallet and hash are combined.'],
+    ['averageSecond','Total Pi divided by classified second migration events. Large migrations can raise the average. Lockups for the same wallet and hash are combined.'],
+    ['medianFirst','The middle value after sorting classified first migrations by Pi received. For an even sample, the two middle values are averaged.'],
+    ['medianSecond','The middle value after sorting classified second migrations by Pi received. It is less influenced by unusually large migrations.'],
+    ['classificationCoverage','Share of recent events supported by a matching account creation operation or a hash in the chronological migration index. Unknown rounds remain pending and are excluded from first/second averages. No migration rounds are estimated.'],
+    ['firstTotal','Wallets with at least one detected migration. Wallets with a second migration are also included here. Totals reflect the stored index and can be incomplete while history is being scanned.'],
+    ['secondTotal','Wallets with a detected second distinct migration transaction. This is a wallet count, not a count of lockups.'],
+    ['second24h','Wallets whose second migration was detected in the last 24 hours. A wallet is counted once, on the day its second migration was seen, not once per lockup.'],
+    ['second7d','Wallets whose second migration was detected in the last seven days. The window rolls continuously, so it is not a calendar week and it overlaps with the 24 hour card.'],
+    ['weeklyPi','Sum of every lockup created in the last seven days, first and second migrations together, including events still pending classification. Locked Pi is counted at creation time and is not necessarily claimable yet.'],
+    ['volumeFirst','Sum of Pi in events classified as first migrations over the last 15 days. Events pending classification are excluded, so this total can rise as classification improves.'],
+    ['volumeSecond','Sum of Pi in confirmed second migration events over the last 15 days. Account age does not prove the migration round.'],
+    ['weeklyWallets','Distinct wallets that received Pi in the last seven days through a first or second migration. A wallet receiving twice in the window is counted once.'],
+    ['onlyFirst','Wallets with a detected first migration and no second migration yet. It is the difference between the two lifetime counters, so it shrinks as second migrations are detected.'],
+    ['claimableCount','Total claimable balances examined by the crawler. One migration event usually creates two of them, a short and a long lockup, so this number is larger than the event count.']
+  ]){
+    const detail=document.createElement('details');detail.className='metric-info';detail.innerHTML='<summary aria-label="Explain this metric">ⓘ About this number</summary><p>'+text+'</p>';
+    $(id).closest('article').append(detail);
+  }
+  const health=document.createElement('section');health.id='health';health.className='section panel';health.innerHTML='<div class="section-head"><div><h2>Data health</h2><p>Reported by the crawler · not a live database probe</p></div></div><dl class="health-grid"><div><dt>D1 persistence</dt><dd id="healthStorage">—</dd></div><div><dt>Last report received</dt><dd id="healthReport">—</dd></div><div><dt>Historical index</dt><dd id="healthHistory">—</dd></div><div><dt>Recent window</dt><dd id="healthRecent">—</dd></div><div><dt>Index covers from</dt><dd id="healthCoverage">—</dd></div></dl><p class="panel-sub">A report can be published during a crawl. It does not mean the entire Action succeeded. Historical percentage is unavailable without a verified total to scan.</p>';
+  $('rankingBody').closest('section').after(health);
+  const mobile=document.createElement('div');mobile.id='mobileWallets';mobile.className='mobile-wallets';$('rankingBody').closest('.ranking-wrap').after(mobile);
+}
+function updateRefinedStatus(stats){
+  const partial=!stats.complete||stats.recentScan?.complete!==true;
+  $('qualityNote').className='quality-note'+(partial?'':' ready');
+  $('qualityNote').textContent=partial?'Partial data — historical indexing or the recent scan is still incomplete. Classified metrics may change.':'Scan complete as of the latest report.';
+  if(Number(stats.schemaVersion||0)<15){$('qualityNote').textContent='Legacy report: update the Worker and complete a v27 crawler publication before relying on classifications.';}
+  if(stats.lifetimeOrdinalReliable===false){$('qualityNote').textContent='Historical gap detected. Lifetime migration rounds need a full history review.';$('firstTotal').textContent='—';$('secondTotal').textContent='—';}
+  if(Number(stats.releaseVersion||0)<28)$('qualityNote').textContent+=' Event evidence awaits the v28 crawler publication.';
+  if(stats.validation?.ambiguousRecentOperations)$('qualityNote').textContent+=' '+fmt(stats.validation.ambiguousRecentOperations)+' operations excluded: recipient ambiguous.';
+  if(stats.lifetimeTotalsProtected)$('qualityNote').textContent+=' Lifetime counters may retain previously published higher values; these are not a substitute for the detailed index.';
+  $('healthStorage').textContent=stats.storage?.error?'Sync failed: '+stats.storage.error:stats.storage?.d1Ready?'Persistent at last report':stats.storage?.d1SeedInProgress?'Initial copy in progress':'Persistence not confirmed';
+  const coverage=stats.indexCoverageFrom?new Date(stats.indexCoverageFrom).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):null;
+  $('healthCoverage').textContent=coverage?'Migrations indexed from '+coverage:(stats.complete?'Full history':'Building · start date not set');
+  if($('coverageMeta'))$('coverageMeta').textContent=coverage?'data from '+coverage+' onward':'data coverage: full history';
+  $('healthReport').textContent=stats.receivedAt||stats.generatedAt?new Date(stats.receivedAt||stats.generatedAt).toLocaleString('en-US'):'Unavailable';
+  $('healthHistory').textContent=stats.complete?'Synced at last report':fmt(stats.pagesScanned||0)+' pages scanned · syncing';
+  const scanAt=stats.recentScan?.startedAt;
+  const age=scanAt?Math.max(0,Math.floor((Date.now()-Date.parse(scanAt))/60000)):null;
+  $('healthRecent').textContent=stats.recentScan?.complete?'Scan complete · '+(age==null?'collection time unavailable':age+' min since collection started'):fmt(stats.recentScan?.pages||0)+' pages · partial scan';
+  if(age==null || age>20){$('qualityNote').className='quality-note';$('qualityNote').textContent+=' Recent window freshness is not confirmed; report time is not collection time.';}
+}
+function compactCardNumbers(){
+  document.querySelectorAll('.stat-value,.largest-amount').forEach(el=>{
+    const raw=el.textContent;const match=raw.match(/^(≥ )?([\d,.]+)( Pi)?$/);if(!match)return;
+    const value=Number(match[2].replaceAll(',',''));el.title=raw;
+    if(value>=1000)el.textContent=(match[1]||'')+new Intl.NumberFormat('en-US',{notation:'compact',minimumFractionDigits:2,maximumFractionDigits:2}).format(value)+(match[3]||'');
+    el.setAttribute('aria-label',raw);
+  });
+}
+function renderMobileWallets(rows){
+  const target=$('mobileWallets');if(!target)return;
+  const expanded=new Set([...target.querySelectorAll('details[open]')].map(d=>d.dataset.address));
+  target.replaceChildren();
+  for(const row of rows){
+    const detail=document.createElement('details');detail.className='mobile-wallet';detail.dataset.address=row.address;detail.open=expanded.has(row.address);
+    const summary=document.createElement('summary');summary.textContent='#'+row.rank+' · '+shortAddress(row.address)+' · '+fmtPi(row.amountPi,2)+' Pi · '+englishMigrationType(row.migrationType);detail.append(summary);
+    const address=document.createElement('p');address.textContent=row.address;detail.append(address);
+    const copy=document.createElement('button');copy.type='button';copy.className='mobile-copy';copy.textContent='Copy wallet';copy.dataset.address=row.address;copy.onclick=()=>copyWallet(copy);detail.append(copy);
+    const evidence=document.createElement('div');evidence.innerHTML=evidenceDetails(row);detail.append(evidence);
+    const balance=document.createElement('p');balance.dataset.balance=row.address;balance.textContent='Account balance: loading…';detail.append(balance);
+    for(const tranche of row.tranches||[]){const p=document.createElement('p');p.className='lock-detail';p.textContent=fmtPi(tranche.amountPi,7)+' Pi · '+lockDetails(tranche);detail.append(p);}
+    target.append(detail);
+  }
+  if(!rows.length)target.textContent='Waiting for weekly data…';
+}
+function renderDaily(rows){
+  const chart=$('dailyChart');
+  if(!rows.length){chart.innerHTML='<div class="empty">daily history is not available yet</div>';return}
+  const max=Math.max(1,...rows.map(r=>Number(r.first||0)+Number(r.second||0)+Number(r.pending||0)));
+  chart.innerHTML=rows.map(row=>{
+    const first=Math.max(row.first?2:0,Number(row.first||0)/max*100);
+    const second=Math.max(row.second?2:0,Number(row.second||0)/max*100);
+    const pending=Math.max(row.pending?2:0,Number(row.pending||0)/max*100);
+    const title=fmt(row.first)+' first, '+fmt(row.second)+' second and '+fmt(row.pending)+' pending classification on '+row.date;
+    return '<div class="day" title="'+title+'"><div class="bar-pair">'+
+      '<i class="bar first" style="height:'+first+'%"></i>'+
+      '<i class="bar second" style="height:'+second+'%"></i>'+
+      '<i class="bar pending" style="height:'+pending+'%"></i>'+
+      '</div><span class="day-label">'+row.date.slice(8)+'</span></div>';
+  }).join('');
+  addChartDetails(chart,max,'events');
+}
+
+function renderDailyVolume(rows){
+  const chart=$('dailyVolumeChart');
+  if(!rows.length){chart.innerHTML='<div class="empty">daily volume is not available yet</div>';return}
+  const max=Math.max(1,...rows.map(row=>Number(row.firstPi||0)+Number(row.secondPi||0)));
+  chart.innerHTML=rows.map(row=>{
+    const first=Math.max(row.firstPi?2:0,Number(row.firstPi||0)/max*100);
+    const second=Math.max(row.secondPi?2:0,Number(row.secondPi||0)/max*100);
+    const title=fmtPi(row.firstPi||0,2)+' Pi in first migrations and '+fmtPi(row.secondPi||0,2)+' Pi in second migrations on '+row.date;
+    return '<div class="day" title="'+title+'"><div class="bar-pair">'+
+      '<i class="bar first" style="height:'+first+'%"></i>'+
+      '<i class="bar second" style="height:'+second+'%"></i>'+
+      '</div><span class="day-label">'+row.date.slice(8)+'</span></div>';
+  }).join('');
+  addChartDetails(chart,max,'Pi');
+}
+
+function addChartDetails(chart,max,unit){
+  let caption=document.getElementById(chart.id+'Details');
+  if(!caption){caption=document.createElement('p');caption.id=chart.id+'Details';caption.className='chart-details';caption.setAttribute('aria-live','polite');chart.after(caption);}
+  const scale='Scale: 0–'+fmtPi(max,0)+' '+unit+'. ';
+  caption.textContent=scale+'Select a day for exact values. Dates use UTC.';
+  for(const day of chart.querySelectorAll('.day')){
+    day.tabIndex=0;day.setAttribute('role','button');day.setAttribute('aria-label',day.title);
+    const show=()=>{caption.textContent=scale+day.title;};
+    day.onclick=show;day.onfocus=show;day.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show();}};
+  }
+}
+
+function insightCell(bucket){
+  return '<span class="insight-pi">'+fmtPi(bucket?.totalPi||0,2)+' Pi</span><span class="insight-count">'+fmt(bucket?.lockups||0)+' lockups</span>';
+}
+
+function renderLockupDistribution(distribution){
+  const body=$('lockupDistributionBody'),empty=$('lockupDistributionEmpty');
+  const rows=[
+    ['upTo30Days','Up to 30 days'],
+    ['oneToSixMonths','1–6 months'],
+    ['sixToTwelveMonths','6–12 months'],
+    ['overOneYear','More than 1 year'],
+    ['unknown','Lock period unavailable'],
+  ];
+  if(!distribution){body.innerHTML='';empty.style.display='block';return}
+  empty.style.display='none';
+  body.innerHTML=rows.map(([key,label])=>'<tr><td>'+label+'</td><td>'+insightCell(distribution[key]?.first)+'</td><td>'+insightCell(distribution[key]?.second)+'</td></tr>').join('');
+}
+
+function renderSizeDistribution(distribution){
+  const body=$('sizeDistributionBody'),empty=$('sizeDistributionEmpty');
+  const rows=[
+    ['under100','Less than 100 Pi'],
+    ['from100To1000','100–1,000 Pi'],
+    ['from1000To10000','1,000–10,000 Pi'],
+    ['over10000','10,000 Pi or more'],
+  ];
+  if(!distribution){body.innerHTML='';empty.style.display='block';return}
+  empty.style.display='none';
+  body.innerHTML=rows.map(([key,label])=>'<tr><td>'+label+'</td><td>'+fmt(distribution[key]?.first||0)+' events</td><td>'+fmt(distribution[key]?.second||0)+' events</td></tr>').join('');
+}
+
+function largestCard(type,event){
+  if(!event)return '<div class="largest-card"><span class="largest-label">'+type+' migration</span><div class="largest-amount">—</div><div class="largest-meta">No classified event in the last 24 hours</div></div>';
+  return '<div class="largest-card"><span class="largest-label">'+type+' migration</span><div class="largest-amount">'+fmtPi(event.amountPi,7)+' Pi</div>'+
+    '<div class="largest-wallet"><span title="'+event.address+'">'+shortAddress(event.address)+'</span>'+
+    '<button class="copy-wallet" type="button" data-address="'+event.address+'" title="Copy wallet" aria-label="Copy wallet '+event.address+'">'+
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg><span class="copy-label">Copied</span></button></div>'+
+    '<div class="largest-meta">'+fmt(event.balanceCount)+' lockups · '+new Date(event.createdAt).toLocaleString('en-US')+'</div></div>';
+}
+
+function renderLargest24h(largest){
+  if(!largest){$('largest24h').innerHTML='<div class="insight-empty">waiting for the updated crawler…</div>';return}
+  $('largest24h').innerHTML=largestCard('1st',largest?.first)+largestCard('2nd',largest?.second);
+}
+
+function renderRanking(rows){
+  renderMobileWallets(rows);
+  const body=$('rankingBody'),empty=$('rankingEmpty');
+  if(!rows.length){body.innerHTML='';empty.style.display='block';return}
+  empty.style.display='none';
+  body.innerHTML=rows.map((row,index)=>{
+    const tone=index%2===0?'tone-light':'tone-dark';
+    const migrationType=englishMigrationType(row.migrationType);
+    const cls=migrationType==='2nd'?'type second':'type';
+    const cached=balanceCache.get(row.address);
+    const balance=cached&&Date.now()-cached.at<BALANCE_TTL?fmtPi(cached.value,7)+' Pi':'loading…';
+    const tranches=(row.tranches||[]).map((tranche,index)=>{
+      const unlocked=tranche.unlockAt&&Date.parse(tranche.unlockAt)<=Date.now();
+      const migration=ordinal(tranche.migrationNumber);
+      const lock=tranche.lockSeconds==null?'lock period unavailable':formatLock(tranche.lockSeconds);
+      const until=tranche.unlockAt?' · unlock date '+new Date(tranche.unlockAt).toLocaleDateString('en-US') : '';
+      return '<span class="tranche '+(unlocked?'unlocked':'')+'"><b>'+migration+' migration · '+fmtPi(tranche.amountPi,7)+' Pi</b><span class="lock">'+escapeText(lockDetails(tranche))+'</span></span>';
+    }).join('');
+    return '<tr class="wallet-row '+tone+'"><td class="rank">#'+row.rank+'</td>'+
+      '<td class="address"><span class="address-cell"><span title="'+row.address+'">'+shortAddress(row.address)+'</span>'+
+      '<button class="copy-wallet" type="button" data-address="'+row.address+'" title="Copy wallet" aria-label="Copy wallet '+row.address+'">'+
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg><span class="copy-label">Copied</span></button></span></td>'+
+      '<td>'+evidenceDetails(row)+'</td>'+
+      '<td>'+fmt(row.balanceCount)+'</td>'+
+      '<td class="current-balance '+(cached?'':'loading')+'" data-balance="'+row.address+'">'+balance+'</td>'+
+      '<td class="amount">'+fmtPi(row.amountPi,7)+' Pi</td></tr>'+
+      '<tr class="tranche-row '+tone+'"><td colspan="6"><div class="tranches"><span class="tranches-label">lockup schedule</span>'+
+      (tranches||'<span class="tranche"><span class="lock">waiting for the next scan…</span></span>')+'</div></td></tr>';
+  }).join('');
+  loadRankingBalances(rows);
+}
+
+function escapeText(value){const span=document.createElement('span');span.textContent=String(value??'');return span.innerHTML;}
+function lockDetails(tranche){
+  const original=tranche.lockSeconds==null?'Unknown':formatLock(tranche.lockSeconds);
+  const end=Date.parse(tranche.unlockAt);
+  if(!Number.isFinite(end))return 'Original lock: '+original+' · Unlock date unavailable';
+  const remaining=Math.max(0,(end-Date.now())/1000);
+  return 'Original lock: '+original+' · Unlocks: '+new Date(end).toLocaleDateString('en-US',{timeZone:'UTC'})+' UTC · '+(remaining?formatLock(remaining)+' remaining':'Lock ended; claim status not verified');
+}
+function evidenceDetails(row){
+  const items=row.evidence||[];
+  const pending=!items.length||items.some(item=>item.status!=='Confirmed');
+  return '<details class="evidence '+(pending?'pending':'confirmed')+'"><summary>'+escapeText(englishMigrationType(row.migrationType))+' <span>View evidence</span></summary><div class="evidence-body">'+
+    (items.length?items.map(item=>{
+      const hash=String(item.transactionHash||'');
+      const link=/^[a-f0-9]{64}$/i.test(hash)?'<a target="_blank" rel="noopener" href="/horizon/transactions/'+hash+'">'+hash+'</a>':escapeText(hash);
+      return '<p><b>'+escapeText(item.status)+' · '+(item.migrationNumber?ordinal(item.migrationNumber)+' migration':'Round unknown')+'</b><br>'+escapeText(({wallet_history:'Account history scanned from creation',index:'Chronological migration index',create_account:'Matching account creation',account_birth:'Verified account creation'})[item.method]||item.method)+'<br>'+escapeText(item.createdAt)+'<br>'+link+(item.previous?'<br>Previous migration: '+escapeText(item.previous.at)+'<br><code>'+escapeText(item.previous.hash)+'</code>':'')+(item.checkedAt?'<br>History checked: '+escapeText(item.checkedAt):'')+'</p>';
+    }).join(''):'<p>Historical evidence is still being collected. No round is assumed.</p>')+'</div></details>';
+}
+
+function englishMigrationType(value){
+  return ({'1ª':'1st','2ª':'2nd','1ª e 2ª':'1st & 2nd','posterior':'later','em análise':'pending classification'})[value]||value||'pending classification';
+}
+
+function ordinal(value){
+  const number=Number(value);
+  if(!number)return '?';
+  const mod100=number%100;
+  const suffix=mod100>=11&&mod100<=13?'th':({1:'st',2:'nd',3:'rd'}[number%10]||'th');
+  return number+suffix;
+}
+
+function unit(value,singular,plural){return value+' '+(value===1?singular:plural)}
+
+function formatLock(seconds){
+  const days=Math.max(0,Number(seconds||0)/86400);
+  if(days<14)return unit(Math.max(1,Math.round(days)),'day','days');
+  if(days<60)return unit(Math.round(days/7),'week','weeks');
+  if(days<730)return unit(Math.round(days/30.4375),'month','months');
+  const years=days/365.25;
+  const value=Number(years.toFixed(1));
+  return unit(value,'year','years');
+}
+
+async function loadRankingBalances(rows){
+  const addresses=[...new Set(rows.map(row=>row.address))];
+  const stale=addresses.filter(address=>{
+    const cached=balanceCache.get(address);
+    return !cached||Date.now()-cached.at>=BALANCE_TTL;
+  });
+  if(stale.length){
+    try{
+      const response=await fetch('/wallet-balances?addresses='+encodeURIComponent(stale.join(',')),{cache:'no-store'});
+      if(response.ok){
+        const data=await response.json();
+        for(const address of stale){
+          const value=data.balances?.[address];
+          if(value!=null)balanceCache.set(address,{value,at:Date.parse(data.balanceUpdatedAt?.[address])||Date.now()});
+        }
+      }
+    }catch(error){}
+  }
+  for(const address of addresses){
+    const cached=balanceCache.get(address);
+    document.querySelectorAll('[data-balance="'+address+'"]').forEach(cell=>{
+      cell.textContent=(cell.closest('.mobile-wallet')?'Account balance: ':'')+(cached&&cached.value!=null?fmtPi(cached.value,7)+' Pi':'unavailable');
+      cell.classList.remove('loading');
+      cell.title=cached?'Balance checked '+new Date(cached.at).toLocaleString('en-US')+' · cached up to 30 minutes':'Balance unavailable';
+    });
+  }
+}
+
+async function copyWallet(button){
+  const address=button.dataset.address;
+  try{
+    if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(address);
+    else{
+      const area=document.createElement('textarea');
+      area.value=address;area.setAttribute('readonly','');area.style.position='fixed';area.style.opacity='0';
+      document.body.appendChild(area);area.select();document.execCommand('copy');area.remove();
+    }
+    button.classList.add('copied');button.title='Copied!';button.setAttribute('aria-label','Wallet copied');
+    if(button.classList.contains('mobile-copy'))button.textContent='Copied!';
+    clearTimeout(button._copyTimer);
+    button._copyTimer=setTimeout(()=>{button.classList.remove('copied');button.title='Copy wallet';button.setAttribute('aria-label','Copy wallet '+address);if(button.classList.contains('mobile-copy'))button.textContent='Copy wallet'},1600);
+  }catch(error){button.title='Unable to copy';}
+}
+
+document.addEventListener('click',event=>{
+  const button=event.target.closest('.copy-wallet');
+  if(button)copyWallet(button);
+});
+
+async function loadMigration(){
+  try{
+    const separator=CONFIG.MIGRATION_URL.includes('?')?'&':'?';
+    const response=await fetch(CONFIG.MIGRATION_URL+separator+'_='+Date.now(),{
+      cache:'no-store',headers:{'cache-control':'no-cache'}
+    });
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const stats=await response.json();
+    if(!stats)throw new Error('no data');
+    updateRefinedStatus(stats);
+    const modern=Number(stats.schemaVersion||0)>=3;
+    const weekly=stats.weekly||{};
+    const averages=stats.migrationAverages||{};
+    const averagesReady=Number(stats.schemaVersion||0)>=11;
+    const distributionReady=Number(stats.schemaVersion||0)>=12;
+    const classification=averages.classification||{};
+    const insightsReady=Number(stats.schemaVersion||0)>=13;
+    const insights=stats.migrationInsights||{};
+    const recent=stats.recentScan||{};
+    const storage=stats.storage||{};
+
+    $('firstTotal').textContent=fmt(stats.firstMigrationsDetected!=null?stats.firstMigrationsDetected:stats.uniqueRecipients);
+    $('secondTotal').textContent=fmt(stats.receivedSecondMigration);
+    $('second24h').textContent=modern?fmt(stats.secondMigrationLast24h):'—';
+    $('second7d').textContent=modern?fmt(stats.secondMigrationLast7d):'—';
+    $('weeklyPi').textContent=modern?fmtPi(weekly.totalPi,2)+' Pi':'—';
+    $('averageFirst').textContent=!averagesReady?'Updating…':averages.first?.averagePi!=null?fmtPi(averages.first.averagePi,2)+' Pi':'—';
+    $('averageSecond').textContent=!averagesReady?'Updating…':averages.second?.averagePi!=null?fmtPi(averages.second.averagePi,2)+' Pi':'—';
+    $('averageFirstSub').textContent=!averagesReady
+      ? 'waiting for the updated crawler'
+      : averages.first?.events
+        ? 'lockups combined · '+fmt(averages.first.events)+' classified events'
+        : 'no classified events in this window';
+    $('averageSecondSub').textContent=!averagesReady
+      ? 'waiting for the updated crawler'
+      : averages.second?.events
+        ? 'lockups combined · '+fmt(averages.second.events)+' classified events'
+        : 'no classified events in this window';
+    $('volumeFirst').textContent=!distributionReady?'Updating…':fmtPi(averages.first?.totalPi||0,2)+' Pi';
+    $('volumeSecond').textContent=!distributionReady?'Updating…':fmtPi(averages.second?.totalPi||0,2)+' Pi';
+    $('medianFirst').textContent=!distributionReady?'Updating…':averages.first?.medianPi!=null?fmtPi(averages.first.medianPi,2)+' Pi':'—';
+    $('medianSecond').textContent=!distributionReady?'Updating…':averages.second?.medianPi!=null?fmtPi(averages.second.medianPi,2)+' Pi':'—';
+    $('classificationCoverage').textContent=!distributionReady?'Updating…':Number(classification.verifiedPercent!=null?classification.verifiedPercent:classification.coveragePercent||0).toFixed(1)+'%';
+    $('classificationCoverageSub').textContent=!distributionReady
+      ? 'waiting for the updated crawler'
+      : classification.verifiedEvents!=null
+        ? fmt(classification.verifiedEvents)+' confirmed of '+fmt(classification.totalEvents||0)+' events'
+          +(classification.inferredEvents?' · '+fmt(classification.inferredEvents)+' inferred':'')
+        : fmt(classification.classifiedEvents||0)+' of '+fmt(classification.totalEvents||0)+' events classified';
+    $('secondEventShare').textContent=insightsReady?Number(insights.secondMigrationShare?.eventsPercent||0).toFixed(1)+'%':'Updating…';
+    $('secondVolumeShare').textContent=insightsReady?Number(insights.secondMigrationShare?.volumePercent||0).toFixed(1)+'%':'Updating…';
+    $('secondShareMeta').innerHTML=insightsReady
+      ? '<b>Classified sample:</b> '+fmt(insights.secondMigrationShare?.firstEvents||0)+' first and '+fmt(insights.secondMigrationShare?.secondEvents||0)+' second migration events.'
+      : '<b>Waiting:</b> run the schema 13 crawler to calculate these shares.';
+    $('weeklyWallets').textContent=modern?fmt(weekly.walletCount):'—';
+    $('onlyFirst').textContent=fmt(stats.onlyFirst);
+    $('claimableCount').textContent=modern?fmt(stats.claimableBalancesScanned):fmt(stats.totalPayments);
+    $('indexedWallets').textContent=fmt(stats.uniqueMigrationRecipients!=null?stats.uniqueMigrationRecipients:stats.uniqueRecipients);
+    if(stats.wallet){
+      $('originWallet').textContent=stats.wallet;
+      $('originCopy').dataset.address=stats.wallet;
+    }
+    const lastMigration=stats.lastMigrationAt||recent.newestAt;
+    $('originLast').textContent=lastMigration
+      ? new Date(lastMigration).toLocaleString('en-US')+' · '+ago(lastMigration)+' ago'
+      : 'no migration seen in the window';
+    $('migStamp').textContent=stats.generatedAt?'updated '+new Date(stats.generatedAt).toLocaleString('en-US'):'time unavailable';
+    $('weeklyFirst').textContent=modern?fmt(weekly.firstMigrationEvents):'—';
+    $('weeklySecond').textContent=modern?fmt(weekly.secondMigrationEvents):'—';
+    $('weeklyPending').textContent=modern?fmt(weekly.pendingClassificationEvents):'—';
+    $('latestSecond').textContent=stats.latestSecondMigrationAt?new Date(stats.latestSecondMigrationAt).toLocaleDateString('en-US'):'—';
+    $('weeklyRange').textContent=weekly.from
+      ? 'From '+new Date(weekly.from).toLocaleDateString('en-US')+' to now'+(recent.complete===false?' · partial data':'')
+      : 'Last seven days';
+    $('rankingMeta').textContent=modern
+      ? fmt(weekly.walletCount)+' wallets'+(recent.complete===false?' · loading more…':' in the full window')
+      : 'weekly data unavailable';
+    $('syncMeta').textContent=modern
+      ? fmt(stats.pagesScanned)+' pages · '+fmt(stats.recordsScanned)+' operations examined'
+      : '/stats still contains the old format. Run the new crawler.';
+
+    const complete=stats.complete===true;
+    $('indexChip').className='chip '+(complete?'good':'warn');
+    $('indexChip').textContent=modern?(complete?'index complete':'index building'):'old data';
+    $('syncLabel').className='chip '+(complete?'good':'warn');
+    $('syncLabel').textContent=complete?'synced':modern?'processing':'legacy';
+    $('syncProgress').className='progress '+(complete?'':'working');
+    $('storageChip').className='chip '+(storage.d1Ready?'good':storage.d1SeedInProgress?'warn':'');
+    $('storageChip').textContent=storage.d1Ready?'D1 persistent':storage.d1SeedInProgress?'copying to D1':'D1 waiting';
+    renderDaily(Array.isArray(stats.daily)?stats.daily:[]);
+    renderDailyVolume(insightsReady&&Array.isArray(stats.daily)?stats.daily:[]);
+    renderLockupDistribution(insightsReady?insights.lockupDistribution:null);
+    renderSizeDistribution(insightsReady?insights.sizeDistribution:null);
+    renderLargest24h(insightsReady?insights.largest24h:null);
+    historicalRanking={rows:Array.isArray(stats.weeklyMigrationRanking)?stats.weeklyMigrationRanking:[],meta:$('rankingMeta').textContent,updatedAt:stats.generatedAt};
+    renderPriorityRanking();
+    compactCardNumbers();
+    renderLiveMetrics();
+    networkStatus(true);
+  }catch(error){
+    $('indexChip').className='chip bad';$('indexChip').textContent='statistics unavailable';
+    $('storageChip').className='chip bad';$('storageChip').textContent='D1 unavailable';
+    $('syncLabel').className='chip bad';$('syncLabel').textContent='error';
+    $('syncMeta').textContent='Unable to load /stats.';
+    $('qualityNote').textContent='Unable to refresh statistics. Previously displayed data may be stale.';
+    $('healthStorage').textContent='Status unavailable';
+    networkStatus(false);
+  }
+}
+
+async function loadSupply(){
+  if(!CONFIG.SUPPLY_URL)return;
+  try{
+    const stats=await (await fetch(CONFIG.SUPPLY_URL)).json();
+    const total=Number(stats.migrated||0)||Number(stats.locked||0)+Number(stats.unlocked||0);
+    const locked=total?Number(stats.locked||0)/total*100:0;
+    $('supplySection').hidden=false;
+    $('supplyBody').innerHTML='<div class="stat-value">'+fmtPi(total,0)+' Pi</div>'+
+      '<div class="stack"><i style="width:'+locked+'%;background:var(--amber)"></i><i style="width:'+(100-locked)+'%;background:var(--green)"></i></div>'+
+      '<div class="legend"><span>'+fmtPi(stats.locked,0)+' Pi locked</span><span>'+fmtPi(stats.unlocked,0)+' Pi available</span></div>';
+  }catch(error){}
+}
+
+async function lookup(){
+  const address=$('addr').value.trim(),err=$('lookErr'),out=$('lookResult');
+  err.classList.remove('show');out.classList.remove('show');
+  if(!address){err.textContent='Paste an address first.';err.classList.add('show');return}
+  const wallet=$('originCopy')?.dataset.address||'';
+  try{
+    const account=await fetchJson('/accounts/'+encodeURIComponent(address));
+    if(!account)throw new Error('Wallet not found on Mainnet.');
+    const native=account.balances.find(b=>b.asset_type==='native')||{};
+
+    // Operações da conta: identificam criação e cada transação de migração.
+    const ops=(await fetchJson('/accounts/'+encodeURIComponent(address)+'/operations?order=asc&limit=200'))
+      ?._embedded?.records||[];
+    const birth=ops[0];
+    const createdByMigration=birth?.type==='create_account'&&(!wallet||birth.source_account===wallet);
+    const migrationTx=new Set();
+    for(const op of ops){
+      if(op.type!=='create_claimable_balance')continue;
+      if(wallet&&op.source_account!==wallet)continue;
+      if(op.transaction_hash)migrationTx.add(op.transaction_hash);
+    }
+    const rounds=migrationTx.size;
+
+    // Lockups ainda não resgatados.
+    const balances=(await fetchJson('/claimable_balances?claimant='+encodeURIComponent(address)+'&limit=50'))
+      ?._embedded?.records||[];
+    const lockedPi=balances.reduce((sum,row)=>sum+Number(row.amount||0),0);
+
+    const status=rounds>=2?'2nd migration received'
+      :rounds===1?(createdByMigration?'1st migration only':'one migration event found')
+      :ops.length?'no migration event in the last 200 operations':'no operations found';
+
+    let html='<div class="result-row"><span>migration status</span><b>'+status+'</b></div>'
+      +'<div class="result-row"><span>migration events</span><b>'+fmt(rounds)+'</b></div>'
+      +'<div class="result-row"><span>account created</span><b>'
+        +(birth?.created_at?new Date(birth.created_at).toLocaleDateString('en-US')
+          +(createdByMigration?' · by the migration wallet':''):'—')+'</b></div>'
+      +'<div class="result-row"><span>available balance</span><b>'+fmtPi(native.balance,7)+' Pi</b></div>'
+      +'<div class="result-row"><span>still locked</span><b>'+fmtPi(lockedPi,7)+' Pi · '+fmt(balances.length)+' lockups</b></div>';
+
+    for(const row of balances.slice(0,10)){
+      const claimant=(row.claimants||[]).find(c=>c.destination===address);
+      const unlock=claimant?.predicate?.not?.abs_before||claimant?.predicate?.abs_before;
+      html+='<div class="result-row"><span>lockup</span><b>'+fmtPi(row.amount,7)+' Pi'
+        +(unlock?' · unlocks '+new Date(unlock).toLocaleDateString('en-US'):'')+'</b></div>';
+    }
+    if(balances.length>10)html+='<div class="result-row"><span>…</span><b>'+fmt(balances.length-10)+' more lockups</b></div>';
+
+    out.innerHTML=html;out.classList.add('show');
+  }catch(error){err.textContent=error.message;err.classList.add('show')}
+}
+
+async function fetchJson(path){
+  const response=await fetch(CONFIG.HORIZON+path,{cache:'no-store',headers:{Accept:'application/json'}});
+  if(response.status===404)return null;
+  if(!response.ok)throw new Error('HTTP error '+response.status);
+  return response.json();
+}
+
+$('lookBtn').addEventListener('click',lookup);
+$('addr').addEventListener('keydown',event=>{if(event.key==='Enter')lookup()});
+setupRefinedLayout();
+let liveLoading=false,lastLiveMetrics=null,liveRanking=null,historicalRanking=null,lastRankingSignature='';
+function renderPriorityRanking(){
+  const useLive=$('rankingSource').value==='live'&&liveRanking;
+  const data=useLive?liveRanking:historicalRanking;
+  if(!data)return;
+  $('rankingMeta').textContent=useLive
+    ? (data.complete?'Full seven-day coverage':'Partial seven-day coverage · collected receipts only')+' · '+(data.updatedAt?new Date(data.updatedAt).toLocaleString('en-US'):'waiting')+(data.error?' · ranking update delayed':'')
+    : ($('rankingSource').value==='live'?'Waiting for frequent ranking · showing historical report · ':'')+data.meta+' · '+(data.updatedAt?new Date(data.updatedAt).toLocaleString('en-US'):'');
+  const signature=JSON.stringify([!!useLive,data.rows]);
+  if(signature!==lastRankingSignature){renderRanking(data.rows||[]);lastRankingSignature=signature;}
+  else loadRankingBalances(data.rows||[]);
+}
+$('rankingSource').addEventListener('change',renderPriorityRanking);
+function renderLiveMetrics(){
+  const m=lastLiveMetrics;if(!m)return;
+  for(const [id,value] of [['liveCount',m.events],['liveFirst',m.first],['livePending',m.pending],['liveLater',m.later],['second24h',m.secondWallets],['liveVolume',m.amountPi]]){
+    const el=$(id);el.textContent=id==='liveVolume'?fmtPi(value,7)+' Pi':fmt(value);
+    el.closest('article').querySelector('.stat-sub').textContent=m.complete?'Frequent collection · past 24 hours':'Partial coverage · observed so far';
+  }
+  compactCardNumbers();
+}
+async function loadLive(){
+  if(liveLoading||document.hidden)return;
+  liveLoading=true;
+  try{
+    const response=await fetch('/live',{cache:'no-store',signal:AbortSignal.timeout(10000)});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Live service unavailable');
+    const age=data.checkedAt?(Date.now()-Date.parse(data.checkedAt))/1000:Infinity;
+    const delayed=!!data.error||age>180;
+    $('liveStatus').textContent=delayed?'Delayed':data.backlog?'Catching up':'Collector online';
+    $('liveStatus').className='chip '+(delayed?'bad':'good');
+    $('liveFreshness').textContent=(data.checkedAt?'Last successful collection: '+new Date(data.checkedAt).toLocaleString('en-US'):'No successful collection yet')+(data.error?' · '+data.error:'')+(data.backfilling?(data.backfillPaused?' · Older recovery paused to prioritize new migrations.':' · Recovering older receipts in the background.'):'')+(data.backlog?' · New operations are queued; partial coverage.':'');
+    lastLiveMetrics=data.metrics24h||null;renderLiveMetrics();
+    liveRanking=data.ranking||null;renderPriorityRanking();
+  }catch(error){$('liveStatus').textContent='Unavailable';$('liveStatus').className='chip bad';$('liveFreshness').textContent=error.message+' · Previously displayed receipts may be stale.';}
+  finally{liveLoading=false;}
+}
+loadLive();setInterval(loadLive,20000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadLive();});
+loadMigration();loadSupply();
+setInterval(loadMigration,CONFIG.MIGRATION_POLL_MS);
+</script>
+</body>
+</html>

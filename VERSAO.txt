@@ -1,56 +1,9 @@
-PI Metrics — version 35 (incremental counters, resumable recent history and balance cache)
-Package date: 2026-09-15
+Pi Migration Monitor — v36
 
-Leia RELEASE-v30.md para instalação, coleta frequente, testes e limitações.
-O histórico de funcionalidades abaixo foi herdado das versões anteriores;
-em caso de diferença, RELEASE-v27.md descreve o comportamento atual.
+Dois contadores cumulativos confirmados e Top 20 semanal.
+Novo período inicia na primeira ativação bem-sucedida da v36.
+Sem recuperação de 15 dias, relatórios extensos ou coleta de saldos.
+Sem dependência do GitHub Actions. Coleta no Cron do Worker.
+Dados e evidências antigos preservados no mesmo D1.
 
-Inclui:
-- nova home com todas as estatísticas organizadas;
-- rastreamento separado da primeira e da segunda migração;
-- soma das parcelas create_claimable_balance da mesma transação;
-- aviso claro enquanto o Worker ainda contém estatísticas do crawler antigo;
-- binding permanente do D1 `pi-migrations` no wrangler.toml;
-- volume e mediana separados para primeira e segunda migração nos últimos 15 dias;
-- cobertura de classificação com total de eventos classificados e analisados;
-- distribuição dos lockups por duração, separada por primeira e segunda migração;
-- gráfico diário de volume de Pi para primeira e segunda migração;
-- participação da segunda migração por eventos e volume de Pi;
-- distribuição das migrações por faixa de valor;
-- maior primeira e segunda migração das últimas 24 horas, com botão de cópia;
-- totais corrigíveis, sem manter máximos antigos incorretos;
-- ranking semanal das 20 carteiras que mais receberam Pi;
-- publicação parcial do progresso durante a indexação;
-- atualização automática do painel a cada 10 segundos.
-- leitura recente separada: ranking, valores, resumo semanal e gráfico de 14 dias
-  são preenchidos antes de terminar o índice histórico.
-- a primeira página recente é publicada imediatamente; as demais aparecem
-  progressivamente, sem esperar a varredura completa dos 15 dias.
-- a home consulta novas estatísticas a cada 10 segundos e ignora caches antigos.
-- o índice de carteiras e o cursor são copiados para o D1 em lotes;
-- se o cache do GitHub for perdido, o crawler restaura o progresso pelo D1.
-- os cartões de 2ª migração em 24 horas e 7 dias usam também a leitura recente;
-- execuções novas aguardam a anterior, sem cancelamento automático.
-- a cópia inicial para o D1 não pausa mais o avanço do índice histórico;
-- carteiras “em análise” passam a ser classificadas enquanto o D1 é preenchido.
-- o Top 20 semanal possui botão para copiar o endereço completo da carteira.
-- o Top 20 mostra o saldo disponível atual de cada carteira, com cache de 5 minutos;
-- cada parcela mostra valor e duração do bloqueio em dias, semanas, meses ou anos.
-- toda a interface da home e do inspetor foi convertida para inglês;
-- “parcelas” foi substituído por “lockups” e “lockup schedule”.
-- os eventos recentes permanecem no relatório, mas não são duplicados no checkpoint;
-- corrige `RangeError: Invalid string length` após a leitura dos últimos 15 dias.
-- identifica imediatamente a primeira migração quando `create_account` aparece
-  na mesma transação dos `create_claimable_balance`;
-- corrige o contador semanal de eventos de primeira migração que permanecia zero.
-- exige que `create_account` e `create_claimable_balance` tenham a mesma carteira
-  destinatária, evitando marcar como primeira todas as pessoas de um lote;
-- corrige casos de segunda migração exibidos incorretamente como primeira.
-- divide o índice histórico em arquivos menores de checkpoint;
-- evita `Invalid string length` mesmo após milhões de carteiras;
-- o workflow salva e restaura `checkpoint.json` junto com `checkpoint.json.parts`.
-- cada carteira e seus lockups agora compartilham a mesma tonalidade;
-- os grupos alternam entre fundo claro e escuro, com bordas laterais e separadores.
-- adiciona médias separadas da primeira e da segunda migração na visão geral;
-- soma todos os lockups do mesmo evento antes de calcular a média de 15 dias;
-- exclui eventos ainda não classificados da amostra e mostra seu tamanho.
+Leia README.md antes de publicar o pacote completo.

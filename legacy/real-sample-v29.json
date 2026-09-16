@@ -1,0 +1,279 @@
+{
+  "collectedAt": "2026-09-15",
+  "wallets": [
+    {
+      "address": "GAQELXP2IXPZTRB6AIM7L6UVRB2O7UJZKTNU2ZQEYCC374CNE4GBYW4K",
+      "expectedLatestRound": 2,
+      "records": [
+        {
+          "type": "create_account",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "account": "GAQELXP2IXPZTRB6AIM7L6UVRB2O7UJZKTNU2ZQEYCC374CNE4GBYW4K",
+          "transaction_successful": true,
+          "transaction_hash": "3e17835cacf88b50d8955eb99d8089d140f811ae2eb6e6f1a1eb0985927bca96",
+          "created_at": "2025-03-04T01:27:26Z",
+          "id": "83843778867105858",
+          "paging_token": "83843778867105858"
+        },
+        {
+          "type": "create_claimable_balance",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "asset": "native",
+          "transaction_successful": true,
+          "transaction_hash": "3e17835cacf88b50d8955eb99d8089d140f811ae2eb6e6f1a1eb0985927bca96",
+          "created_at": "2025-03-04T01:27:26Z",
+          "amount": "11.0127227",
+          "claimants": [
+            {
+              "destination": "GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ",
+              "predicate": {
+                "rel_before": "1209600"
+              }
+            },
+            {
+              "destination": "GAQELXP2IXPZTRB6AIM7L6UVRB2O7UJZKTNU2ZQEYCC374CNE4GBYW4K",
+              "predicate": {
+                "not": {
+                  "rel_before": "1209600"
+                }
+              }
+            }
+          ],
+          "id": "83843778867105859",
+          "paging_token": "83843778867105859"
+        },
+        {
+          "type": "create_claimable_balance",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "asset": "native",
+          "transaction_successful": true,
+          "transaction_hash": "3e17835cacf88b50d8955eb99d8089d140f811ae2eb6e6f1a1eb0985927bca96",
+          "created_at": "2025-03-04T01:27:26Z",
+          "amount": "12.0127227",
+          "claimants": [
+            {
+              "destination": "GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ",
+              "predicate": {
+                "rel_before": "1209600"
+              }
+            },
+            {
+              "destination": "GAQELXP2IXPZTRB6AIM7L6UVRB2O7UJZKTNU2ZQEYCC374CNE4GBYW4K",
+              "predicate": {
+                "not": {
+                  "rel_before": "94820909"
+                }
+              }
+            }
+          ],
+          "id": "83843778867105860",
+          "paging_token": "83843778867105860"
+        },
+        {
+          "type": "create_claimable_balance",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "asset": "native",
+          "transaction_successful": true,
+          "transaction_hash": "97a5a3697c48c0e4aa4110af1f76d85eba2e2d4f5487fa15ac29148f0cad5712",
+          "created_at": "2026-09-14T20:50:57Z",
+          "amount": "14.3992849",
+          "claimants": [
+            {
+              "destination": "GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ",
+              "predicate": {
+                "rel_before": "1209600"
+              }
+            },
+            {
+              "destination": "GAQELXP2IXPZTRB6AIM7L6UVRB2O7UJZKTNU2ZQEYCC374CNE4GBYW4K",
+              "predicate": {
+                "not": {
+                  "rel_before": "1209600"
+                }
+              }
+            }
+          ],
+          "id": "123348072011948126",
+          "paging_token": "123348072011948126"
+        },
+        {
+          "type": "create_claimable_balance",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "asset": "native",
+          "transaction_successful": true,
+          "transaction_hash": "97a5a3697c48c0e4aa4110af1f76d85eba2e2d4f5487fa15ac29148f0cad5712",
+          "created_at": "2026-09-14T20:50:57Z",
+          "amount": "14.3992849",
+          "claimants": [
+            {
+              "destination": "GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ",
+              "predicate": {
+                "rel_before": "1209600"
+              }
+            },
+            {
+              "destination": "GAQELXP2IXPZTRB6AIM7L6UVRB2O7UJZKTNU2ZQEYCC374CNE4GBYW4K",
+              "predicate": {
+                "not": {
+                  "rel_before": "89393700"
+                }
+              }
+            }
+          ],
+          "id": "123348072011948127",
+          "paging_token": "123348072011948127"
+        }
+      ]
+    },
+    {
+      "address": "GBUZKIRZWM3YVDUYHLUFZ6CKBP5LPVK3C7GRKKYQJH44GTNC33TO5UUX",
+      "expectedLatestRound": 2,
+      "records": [
+        {
+          "type": "create_account",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "account": "GBUZKIRZWM3YVDUYHLUFZ6CKBP5LPVK3C7GRKKYQJH44GTNC33TO5UUX",
+          "transaction_successful": true,
+          "transaction_hash": "880101ee1cfa544f662f55fd2755a29922a8c0d1a55ec427aeb53441e18355d0",
+          "created_at": "2025-03-04T02:09:35Z",
+          "id": "83845849041346567",
+          "paging_token": "83845849041346567"
+        },
+        {
+          "type": "create_claimable_balance",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "asset": "native",
+          "transaction_successful": true,
+          "transaction_hash": "880101ee1cfa544f662f55fd2755a29922a8c0d1a55ec427aeb53441e18355d0",
+          "created_at": "2025-03-04T02:09:35Z",
+          "amount": "316.1093237",
+          "claimants": [
+            {
+              "destination": "GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ",
+              "predicate": {
+                "rel_before": "1209600"
+              }
+            },
+            {
+              "destination": "GBUZKIRZWM3YVDUYHLUFZ6CKBP5LPVK3C7GRKKYQJH44GTNC33TO5UUX",
+              "predicate": {
+                "not": {
+                  "rel_before": "88892555"
+                }
+              }
+            }
+          ],
+          "id": "83845849041346568",
+          "paging_token": "83845849041346568"
+        },
+        {
+          "type": "create_claimable_balance",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "asset": "native",
+          "transaction_successful": true,
+          "transaction_hash": "97a5a3697c48c0e4aa4110af1f76d85eba2e2d4f5487fa15ac29148f0cad5712",
+          "created_at": "2026-09-14T20:50:57Z",
+          "amount": "321.0193872",
+          "claimants": [
+            {
+              "destination": "GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ",
+              "predicate": {
+                "rel_before": "1209600"
+              }
+            },
+            {
+              "destination": "GBUZKIRZWM3YVDUYHLUFZ6CKBP5LPVK3C7GRKKYQJH44GTNC33TO5UUX",
+              "predicate": {
+                "not": {
+                  "rel_before": "95229798"
+                }
+              }
+            }
+          ],
+          "id": "123348072011948128",
+          "paging_token": "123348072011948128"
+        }
+      ]
+    },
+    {
+      "address": "GDTHYIIV27UIIP6R4S6XMH53PRHZNUNHFJURHKEIZM4TAZVIPUIH6OUX",
+      "expectedLatestRound": 1,
+      "records": [
+        {
+          "type": "create_account",
+          "source_account": "GAMT3GAWJ6G7X7OWPOP35A63ME47HJDUI6SMHTTHBD72HHCIBHLCPRS2",
+          "account": "GDTHYIIV27UIIP6R4S6XMH53PRHZNUNHFJURHKEIZM4TAZVIPUIH6OUX",
+          "transaction_successful": true,
+          "transaction_hash": "342c8c81cb973bbf17c125ac0486a7f327ad01292d7bdc46624bb6b92e9347d0",
+          "created_at": "2025-05-01T06:09:45Z",
+          "id": "87945468339826690",
+          "paging_token": "87945468339826690"
+        },
+        {
+          "type": "create_claimable_balance",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "asset": "native",
+          "transaction_successful": true,
+          "transaction_hash": "97a5a3697c48c0e4aa4110af1f76d85eba2e2d4f5487fa15ac29148f0cad5712",
+          "created_at": "2026-09-14T20:50:57Z",
+          "amount": "1271.7134829",
+          "claimants": [
+            {
+              "destination": "GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ",
+              "predicate": {
+                "rel_before": "1209600"
+              }
+            },
+            {
+              "destination": "GDTHYIIV27UIIP6R4S6XMH53PRHZNUNHFJURHKEIZM4TAZVIPUIH6OUX",
+              "predicate": {
+                "not": {
+                  "rel_before": "1209600"
+                }
+              }
+            }
+          ],
+          "id": "123348072011948129",
+          "paging_token": "123348072011948129"
+        },
+        {
+          "type": "create_claimable_balance",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "asset": "native",
+          "transaction_successful": true,
+          "transaction_hash": "97a5a3697c48c0e4aa4110af1f76d85eba2e2d4f5487fa15ac29148f0cad5712",
+          "created_at": "2026-09-14T20:50:57Z",
+          "amount": "424.2378277",
+          "claimants": [
+            {
+              "destination": "GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ",
+              "predicate": {
+                "rel_before": "1209600"
+              }
+            },
+            {
+              "destination": "GDTHYIIV27UIIP6R4S6XMH53PRHZNUNHFJURHKEIZM4TAZVIPUIH6OUX",
+              "predicate": {
+                "not": {
+                  "rel_before": "2419200"
+                }
+              }
+            }
+          ],
+          "id": "123348072011948130",
+          "paging_token": "123348072011948130"
+        },
+        {
+          "type": "payment",
+          "source_account": "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G",
+          "transaction_successful": true,
+          "transaction_hash": "97a5a3697c48c0e4aa4110af1f76d85eba2e2d4f5487fa15ac29148f0cad5712",
+          "created_at": "2026-09-14T20:50:57Z",
+          "amount": "0.0200000",
+          "id": "123348072011948131",
+          "paging_token": "123348072011948131"
+        }
+      ]
+    }
+  ]
+}

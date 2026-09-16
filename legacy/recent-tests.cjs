@@ -1,0 +1,33 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),vm=require('node:vm');
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pi-recent-'));
+let source=fs.readFileSync(path.join(__dirname,'migracao-stats.mjs'),'utf8').replace(/^#!.*\n/,'').replace(/import \{[\s\S]*?\} from 'node:fs';/,'');
+source=source.slice(0,source.lastIndexOf('(async () => {'));
+source+='\nglobalThis.api={refreshRecentEvents,saveCheckpoint,getState:()=>state};';
+const calls=[];let respond;
+function boot(){const context={...fs,console,URL,AbortSignal,setTimeout,clearTimeout,process:{env:{CHECKPOINT_FILE:path.join(dir,'checkpoint.json'),OUTPUT_FILE:path.join(dir,'stats.json'),PAGE_LIMIT:'2',RECENT_MAX_PAGES:'2',THROTTLE_MS:'0',RECENT_PUSH_EVERY_PAGES:'1'},on(){}},fetch:async url=>{const u=new URL(url);calls.push([u.searchParams.get('order'),u.searchParams.get('cursor')]);return {ok:true,json:async()=>respond(u)};}};vm.createContext(context);vm.runInContext(source,context);return context.api;}
+const at=new Date().toISOString();
+let api=boot();const wallet=api.getState().wallet;
+const op=(id,hash,amount='1')=>({type:'create_claimable_balance',source_account:wallet,asset:'native',transaction_successful:true,paging_token:String(id),id:String(id),transaction_hash:hash,amount,created_at:at,claimants:[{destination:'A'}]});
+const page=records=>({_embedded:{records}});
+(async()=>{
+ respond=u=>u.searchParams.has('cursor')?page([op(3,'old'),op(2,'old')]):page([op(5,'new'),op(4,'new')]);
+ await api.refreshRecentEvents();api.saveCheckpoint();
+ assert.equal(api.getState().recentCursor.backfill,'2');assert.equal(api.getState().recentScan.complete,false);
+ api=boot();calls.length=0;
+ respond=u=>u.searchParams.get('order')==='asc'?page([]):page([{...op(1,'birth'),type:'create_account',account:'A'}]);
+ await api.refreshRecentEvents();
+ assert.deepEqual(calls,[['asc','5'],['desc','2']],'resume forward and backward cursors, never reload the head');
+ assert.equal(api.getState().recentScan.complete,true);
+ assert.equal(api.getState().recentEvents['A:new'].amountPiExact,'2.0000000');
+ assert.equal(api.getState().recentEvents['A:old'].balanceCount,2);
+ api.saveCheckpoint();api=boot();calls.length=0;
+ respond=()=>page([op(6,'new','0.5')]);await api.refreshRecentEvents();
+ assert.equal(api.getState().recentEvents['A:new'].amountPiExact,'2.5000000','new lockup of an existing transaction adds once');
+ api.saveCheckpoint();api=boot();respond=()=>{throw new Error('simulated network failure');};
+ await assert.rejects(api.refreshRecentEvents(),/network failure/);
+ api=boot();assert.equal(api.getState().recentCursor.head,'6','error retains last committed cursor');
+ calls.length=0;respond=()=>page([]);await api.refreshRecentEvents();
+ assert.deepEqual(calls,[['asc','6']]);assert.equal(api.getState().recentEvents['A:new'].amountPiExact,'2.5000000');
+ respond=()=>({});await assert.rejects(api.refreshRecentEvents(),/Invalid recent/);assert.equal(api.getState().recentCursor.head,'6');
+ fs.rmSync(dir,{recursive:true,force:true});console.log('PASS recent: sharded restart, backfill resume, incremental head, split lockups, network failure and invalid-page safety');
+})().catch(error=>{console.error(error);process.exitCode=1;});

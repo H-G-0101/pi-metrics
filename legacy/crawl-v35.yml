@@ -1,0 +1,68 @@
+name: Crawl Pi migrations
+
+on:
+  workflow_dispatch:            # botão "Run workflow" na aba Actions
+  schedule:
+    - cron: "17 */6 * * *"      # atualiza quatro vezes por dia
+
+# ↓↓↓ EDITE ESTA URL pra do seu Worker ↓↓↓
+env:
+  PUSH_URL: "https://pi-metrics.dogecagepi.workers.dev/stats"
+  PUSH_TOKEN: ${{ secrets.STATS_TOKEN }}
+  WALLET: "GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G"
+  RECOVERY_WALLET: "GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ"
+  THROTTLE_MS: "40"
+  RECENT_PUSH_EVERY_PAGES: "25"
+  D1_SEED_LIMIT: "15000"
+  # Free tier do D1 = 100.000 linhas/dia (UTC). Deixe folga; use "0" no plano pago.
+  D1_DAILY_ROW_BUDGET: "15000"
+
+concurrency:
+  group: crawl-migracao-pi
+  # Cancelar no meio mata o run antes de ele salvar o checkpoint.
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 350         # ~6h, limite do runner gratuito
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # restaura o checkpoint do run anterior (pra retomar de onde parou)
+      - name: Restore checkpoint
+        uses: actions/cache/restore@v4
+        with:
+          # O índice é shardado: sem a pasta .parts o checkpoint.json fica
+          # inválido ("parte ausente") e o crawler recomeça do zero.
+          path: |
+            checkpoint.json
+            checkpoint.json.parts
+          key: pi-ckpt-${{ github.run_id }}
+          restore-keys: pi-ckpt-
+
+      - name: Run crawler
+        run: node migracao-stats.mjs
+
+      # salva o checkpoint atualizado pro próximo run
+      - name: Save checkpoint
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            checkpoint.json
+            checkpoint.json.parts
+          key: pi-ckpt-${{ github.run_id }}
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migracao-stats
+          path: migracao-stats.json

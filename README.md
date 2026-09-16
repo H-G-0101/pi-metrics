@@ -1,186 +1,51 @@
-# Pi Mainnet — painel + estatística de migração
+# Pi Migration Monitor — v36
 
-**Atualização v31:** leia [RELEASE-v31.md](RELEASE-v31.md) antes de publicar. O agendamento segue as instruções de RELEASE-v30.md.
-As regras atuais excluem inferências de rodada, usam somente o índice persistente
-nos totais Lifetime e corrigem a retomada do D1. Essas regras substituem quaisquer
-descrições de versões anteriores abaixo. Publique Worker e crawler juntos.
+Versão enxuta: carteiras com primeira migração confirmada, carteiras com segunda migração confirmada e Top 20 por Pi recebido nos últimos sete dias. Interface em inglês, números K/M, cópia de endereço, horário da última coleta e pendências de classificação.
 
-Um painel ao vivo da rede Pi mainnet e uma estatística de quem já recebeu a 2ª migração.
-Tudo roda hospedado: o app num **Cloudflare Worker**, o crawl no **GitHub Actions**. Sem PC.
+## Instalar
 
-No Top 20 semanal, o botão ao lado de cada endereço copia a carteira completa e
-confirma visualmente a ação.
+1. Atualize o repositório com o pacote completo, incluindo `.github/workflows/crawl.yml`, `wrangler.toml`, `worker.js` e `src/`.
+2. Publique o Worker com o wrangler.toml. O binding `DB` continua apontando para `pi-migrations`; o Cron continua `* * * * *`.
+3. Se uma Action antiga ainda estiver rodando, cancele essa execução uma vez. O novo workflow não tem agendamento e não executa crawler. O arquivo de entrada antigo também foi substituído por um aviso sem coleta.
+4. Aguarde a primeira execução do Cron. Ela cria automaticamente as tabelas `focus_*` no banco existente e salva o cursor da última operação da carteira de migração.
+5. Verifique `/live`: a resposta deve ter `version: 36`, `startedAt` e depois `checkedAt` avançando. A página informa atraso ou falha em vez de apresentar uma coleta parada como atual.
 
-O ranking também exibe o saldo disponível atual e detalha cada parcela criada
-pela migração, incluindo valor e duração do bloqueio. O prazo é calculado a
-partir do predicado do destinatário no `create_claimable_balance`.
+Não exclua o banco, o KV nem os checkpoints antigos. Esta versão não depende de GitHub Actions. Publicar somente um HTML não ativa o novo coletor; é necessário publicar o Worker gerado. Se você cola worker.js no painel, mantenha o Cron e o binding DB configurados. As novas variáveis são `FOCUS_DAILY_WRITE_BUDGET=85000` e `FOCUS_HISTORY_WRITE_BUDGET=5000`, também valores padrão do código.
 
-Para manter o checkpoint abaixo do limite de serialização do Node.js, a janela
-recente é publicada no relatório, mas não é duplicada no `checkpoint.json`.
-Ela é reconstruída pelo Horizon no começo de cada execução.
+## Novo período de acompanhamento
 
-Na janela recente, uma transação com `create_account` e
-`create_claimable_balance` para o mesmo destinatário é classificada imediatamente
-como primeira migração, mesmo antes de o cursor histórico alcançar essa conta.
-Essa confirmação exige correspondência da carteira criada com o destinatário;
-compartilhar apenas o mesmo hash de um lote não é suficiente.
+Os contadores começam em zero na primeira ativação da v36 e acumulam somente migrações observadas depois do cursor inicial. Não são os totais históricos globais da Pi Network. O horário inicial aparece na home. O início é a ativação, não a meia-noite.
 
-O índice histórico é salvo em partes dentro de `checkpoint.json.parts`, enquanto
-`checkpoint.json` guarda somente os metadados. O workflow deve armazenar os dois
-caminhos para permitir a retomada de índices com milhões de carteiras.
+Dados anteriores permanecem nas tabelas antigas, mas não são somados aos novos contadores. Evidências históricas compatíveis já armazenadas são reutilizadas para classificar novas migrações. A implantação não reprocessa os antigos 15 dias nem tenta recuperar a antiga fila atrasada. Reimplantar a v36 preserva o período e o cursor; não começa do zero novamente.
 
-No ranking, a linha principal e o respectivo lockup schedule formam um único
-grupo visual. Os grupos alternam entre tonalidades clara e escura para facilitar
-a identificação de onde termina uma carteira e começa a próxima.
+O Top 20 soma todos os recebimentos observados por carteira na janela de sete dias. Nas primeiras semanas ou durante atrasos a cobertura é identificada como parcial. Os contadores confirmados são cumulativos e não expiram; o Top 20 é móvel. Os registros continuam armazenados quando saem do ranking.
 
-A visão geral inclui médias separadas de primeira e segunda migração nos últimos
-15 dias. Cada evento entra uma vez na média, depois da soma de todos os lockups
-com o mesmo destinatário e hash; eventos pendentes não entram no cálculo. Enquanto
-o Worker ainda estiver servindo um relatório anterior ao schema 11, os cards
-informam que estão aguardando a execução do crawler atualizado.
+## Trabalho removido da execução
 
-A mesma janela também exibe o volume total e a mediana separados por primeira e
-segunda migração. A cobertura de classificação informa quantos eventos recentes
-já foram associados com segurança a uma dessas duas rodadas.
+Não há coleta de saldos disponíveis, análises de duração de bloqueios, médias, medianas, volumes gerais, distribuições, gráficos, indexação global ou recuperação automática dos 15 dias. A home consulta somente `/live`. As rotas antigas `/stats`, `/d1/*`, `/wallet-balances` e `/horizon/*` retornam 410; não consultam bancos nem a blockchain. O código anterior foi arquivado em `legacy/` para referência e não é incluído no Worker.
 
-Os insights adicionais usam os mesmos eventos agrupados por destinatário e hash:
-distribuição dos lockups por duração, volume diário de Pi, participação da segunda
-migração, faixas de tamanho e maiores eventos classificados das últimas 24 horas.
+Guardar o valor dos lockups ainda é necessário para ordenar o Top 20. IDs das operações ficam junto ao evento; não há uma segunda gravação de cada operação em um arquivo global. Uma página é agregada por destinatário e transação e gravada em lote com o cursor e os contadores, de forma atômica.
 
-Na v26, os totais podem diminuir quando uma classificação incorreta é corrigida.
-Não se mantém artificialmente o maior valor antigo. O D1 armazena carteiras,
-hashes e cursor; falhas interrompem a execução e são informadas no painel.
-Leia RELEASE-v26.md para a ordem de publicação e limitações de recuperação.
+## Confirmação
 
-## Estrutura
+Primeira migração: criação da mesma carteira pela origem de migração no mesmo hash, ou histórico válido desde a criação mostrando essa posição. Segunda migração: segundo hash de migração no histórico contínuo dessa carteira. Quantidade de lockups e idade da carteira não determinam a posição.
 
-```
-pi-metrics/
-├── worker.js               # O APP — sobe isto no Cloudflare (painel + inspetor + proxy + stats)
-├── wrangler.toml           # config de deploy do Worker
-├── migracao-stats.mjs      # crawler da carteira de migração (roda no GitHub Actions)
-├── README.md
-├── .github/
-│   └── workflows/
-│       └── crawl.yml        # agenda/dispara o crawl no GitHub
-└── src/                     # fontes editáveis do worker (opcional)
-    ├── dashboard.html       # o painel
-    ├── inspetor.html        # o inspetor de carteira
-    └── build.mjs            # regenera o worker.js a partir das fontes
-```
+Quando falta evidência, apenas o histórico da carteira que recebeu uma nova migração é consultado, em páginas salvas e retomáveis. Até quatro páginas de verificação são processadas por execução, depois da coleta recente, dentro da reserva de orçamento. A falta de confirmação não impede que o recebimento apareça no Top 20. Carteiras com origem não verificável ou destinatários ambíguos não são convertidas em segunda migração por dedução.
 
-O `worker.js` já vem pronto — o `src/` só importa se você quiser mexer no visual.
+Uma carteira pode estar nos dois contadores se receber ambas as migrações durante o período. Migrações posteriores podem aparecer no Top 20, mas não aumentam os dois contadores. Recibos com destinatário ambíguo são excluídos da atribuição, não contados como pessoas.
 
-## Rotas do Worker
+## Frequência e limites
 
-| Rota          | O que faz                                            |
-|---------------|------------------------------------------------------|
-| `/`           | painel de rede (altura do ledger, TPS, migração…)    |
-| `/inspetor`   | inspeciona uma carteira e tabula valores/memos       |
-| `/horizon/*`  | proxy pro Horizon do Pi (resolve o CORS)             |
-| `/stats`      | GET devolve a estatística; POST recebe do crawler    |
+Cron: uma vez por minuto, até três páginas de 200 operações da origem por execução, com limite de tempo para a coleta. Site: consulta a cada 20 segundos enquanto visível. Top 20: resultado recalculado a cada cinco minutos. Essas frequências não garantem ausência de atraso em picos ou quando a API está indisponível.
 
-## 1. Deploy do Worker (Cloudflare)
+O D1 continua tendo as cotas do plano contratado. Há orçamento conservador de 85.000 linhas escritas por dia para esta coleta, incluindo uma reserva de até 5.000 para verificação. O consumo conhecido da coleta antiga no mesmo dia é carregado uma única vez na ativação, sem zerar artificialmente a cota. Outros processos na conta podem consumir recursos fora desse controle. Se o orçamento acabar, o cursor é preservado e a home informa a pausa. Esta simplificação reduz trabalho, mas não promete coleta ilimitada gratuita.
 
-O projeto está conectado ao GitHub, então a config vem do `wrangler.toml`.
+O Top 20 ainda lê os eventos dos sete dias para ordenar valores. Só a contagem cumulativa é incremental; não foi implementado um ranking materializado permanente.
 
-O binding D1 `DB` do banco `pi-migrations` também está declarado no
-`wrangler.toml`. Isso impede que uma nova publicação remova o vínculo criado
-no painel da Cloudflare.
+## Desenvolvimento e validação
 
-1. **Crie o KV**: Cloudflare → *Storage & Databases → KV → Create*. Nome `STATS`.
-2. **Pegue o id** do namespace (a string hexadecimal de ~32 caracteres) e cole no
-   `wrangler.toml`, na linha `id = "..."`, no lugar de `COLE_O_ID_DO_KV_AQUI`.
-3. **Crie o secret**: Worker → *Settings → Variables and Secrets → Add → Secret*.
-   Nome `STATS_TOKEN`, valor uma senha à sua escolha (guarde — é a mesma do crawler).
-4. Commit na `main`. O build publica sozinho.
+`node src/build.mjs` gera worker.js sem incluir o código antigo.
 
-Abra a URL do Worker: o painel deve carregar e a altura do ledger subir a cada poucos segundos.
+`node focus-tests.mjs` requer Node 24 com SQLite integrado. Testa limite inicial sem backfill, lockups combinados, confirmação direcionada, reexecução sem duplicação, rollback de dados/cursor/contadores, terceira migração, destinatário ambíguo, falta de origem, ranking semanal, preservação dos totais e bloqueio de concorrência.
 
-## 2. Rodar o crawl (GitHub Actions)
-
-1. No `.github/workflows/crawl.yml`, troque `PUSH_URL` pela URL do seu Worker + `/stats`.
-2. No repo: *Settings → Secrets and variables → Actions → New repository secret*.
-   Nome `STATS_TOKEN`, **o mesmo valor** do secret do Worker.
-3. Aba *Actions* → "Crawl migração Pi" → **Run workflow**.
-
-Ao iniciar, o crawler lê primeiro os últimos 15 dias em ordem decrescente e publica
-essa janela no Worker. Assim, ranking, valores semanais e gráfico de 14 dias aparecem
-sem esperar o índice histórico terminar. Depois ele retoma a leitura completa das
-operações antigas em ordem crescente. O painel mostra:
-
-A primeira página recente é publicada imediatamente. Durante a continuação da leitura,
-o painel mostra `dados parciais` e atualiza o ranking em novos lotes, sem ficar vazio.
-A home verifica o `/stats` a cada 10 segundos e usa cache desativado.
-
-- pessoas únicas com 2ª migração detectada;
-- novas 2ªs migrações nas últimas 24 horas e nos últimos 7 dias;
-- histórico diário dos últimos 14 dias;
-- 1ªs migrações detectadas pela mesma carteira.
-- ranking semanal das 20 carteiras que mais receberam Pi, somando 1ª e 2ª migração.
-
-Cada execução do GitHub roda até ~6h. Se a carteira for grande e não terminar, o
-`checkpoint.json` fica no cache e a próxima execução **retoma de onde parou** — é só rodar
-de novo (ou deixar o agendamento automático, configurado para quatro vezes por dia).
-
-## 3. Como a 2ª migração é identificada
-
-A fonte correta são as operações `create_claimable_balance` criadas pela carteira
-de migração. A chave de deduplicação é:
-
-```text
-carteira destinatária + transaction_hash = um evento de migração
-```
-
-Uma migração pode criar um ou dois claimable balances no mesmo hash. Eles são parcelas
-da mesma migração (por exemplo, uma parcela com bloqueio curto e outra com bloqueio
-mais longo), portanto são somados, mas contam como somente um evento.
-
-- primeiro hash distinto para o destinatário: **1ª migração**;
-- segundo hash distinto para o mesmo destinatário: **2ª migração**;
-- `claim_claimable_balance`: resgate de uma parcela, não uma nova migração;
-- `create_account`: evidência adicional da primeira migração, não é usado sozinho
-  para calcular a segunda.
-
-O ranking semanal agrega o valor de todos os claimable balances criados para cada
-carteira nos últimos sete dias. Se uma carteira receber primeira e segunda migração
-na mesma janela, os valores aparecem somados e o tipo será `1ª e 2ª`.
-
-## 4. Editar o visual
-
-Mexa em `src/dashboard.html` ou `src/inspetor.html`, rode `node src/build.mjs` pra
-regenerar o `worker.js`, e commite. O build embute os HTMLs no Worker em base64.
-
-## Configuração do crawler
-
-O `migracao-stats.mjs` lê variáveis de ambiente (o workflow já passa as principais):
-`HORIZON`, `WALLET`, `RECOVERY_WALLET`, `PUSH_URL`, `PUSH_TOKEN`,
-`THROTTLE_MS`, `PAGE_LIMIT` e `MAX_PAGES`.
-
-Para testar só uma página sem enviar dados ao Worker:
-
-```bash
-MAX_PAGES=1 CHECKPOINT_FILE=/tmp/pi-checkpoint.json \
-OUTPUT_FILE=/tmp/pi-stats.json node migracao-stats.mjs
-```
-
-O crawler publica progresso parcial a cada 250 páginas e novamente ao encerrar a
-execução. Enquanto o histórico completo não tiver sido percorrido, o painel mostra
-“índice em construção”. Eventos recentes cuja posição ainda depende do histórico
-aparecem como `em análise` e são classificados automaticamente conforme o índice
-avança. `PUSH_EVERY_PAGES` permite alterar a frequência de publicação.
-
-## Índice persistente no Cloudflare D1
-
-Além do KV `STATS`, vincule ao Worker um banco D1 com o nome de variável `DB`.
-O Worker cria/verifica as tabelas automaticamente; o mesmo esquema também está em
-`schema.sql` para execução manual no Console do D1.
-
-Na primeira execução desta versão, o crawler copia até 15.000 carteiras já conhecidas
-para o D1. Se houver mais, continua na execução seguinte sem pausar o avanço histórico.
-Esse limite mantém margem dentro das 100.000 gravações diárias do plano gratuito.
-Quando a cópia termina, a home mostra `D1 persistente`.
-
-Depois disso, cada página histórica atualiza o D1 junto com o checkpoint. Se o cache
-do GitHub Actions desaparecer, o crawler restaura do D1 as carteiras, os hashes e o
-cursor, evitando recomeçar a leitura da blockchain do zero.
+Nenhum dado de produção foi alterado nesta sessão. Não houve medição de consumo na sua conta Cloudflare.
