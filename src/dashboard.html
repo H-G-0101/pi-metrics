@@ -368,7 +368,8 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
 
   <section class="section panel">
     <div class="section-head">
-      <div><h2>Largest migrations in the last 7 days</h2><p>The 20 wallets that received the most Pi through a first or second migration.</p></div>
+      <div><h2>Largest migrations in the last 7 days</h2><p>Top 20 by Pi received. New receipts appear before their migration round is confirmed.</p>
+      <label>Data source <select id="rankingSource" aria-label="Top 20 data source"><option value="live">Frequent collection</option><option value="historical">Historical report</option></select></label></div>
       <div class="updated" id="rankingMeta">—</div>
     </div>
     <div class="ranking-wrap">
@@ -396,7 +397,7 @@ footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display
 </main>
 
 <script>
-const CONFIG={HORIZON:'/horizon',MIGRATION_URL:'/stats',SUPPLY_URL:'',MIGRATION_POLL_MS:10000};
+const CONFIG={HORIZON:'/horizon',MIGRATION_URL:'/stats',SUPPLY_URL:'',MIGRATION_POLL_MS:300000};
 const $=id=>document.getElementById(id);
 const fmt=n=>n==null?'—':Number(n).toLocaleString('en-US');
 const fmtPi=(n,digits=2)=>n==null?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:digits});
@@ -809,7 +810,8 @@ async function loadMigration(){
     renderLockupDistribution(insightsReady?insights.lockupDistribution:null);
     renderSizeDistribution(insightsReady?insights.sizeDistribution:null);
     renderLargest24h(insightsReady?insights.largest24h:null);
-    renderRanking(Array.isArray(stats.weeklyMigrationRanking)?stats.weeklyMigrationRanking:[]);
+    historicalRanking={rows:Array.isArray(stats.weeklyMigrationRanking)?stats.weeklyMigrationRanking:[],meta:$('rankingMeta').textContent,updatedAt:stats.generatedAt};
+    renderPriorityRanking();
     compactCardNumbers();
     renderLiveMetrics();
     networkStatus(true);
@@ -899,7 +901,18 @@ async function fetchJson(path){
 $('lookBtn').addEventListener('click',lookup);
 $('addr').addEventListener('keydown',event=>{if(event.key==='Enter')lookup()});
 setupRefinedLayout();
-let liveLoading=false,lastLiveMetrics=null;
+let liveLoading=false,lastLiveMetrics=null,liveRanking=null,historicalRanking=null,lastRankingSignature='';
+function renderPriorityRanking(){
+  const useLive=$('rankingSource').value==='live'&&liveRanking;
+  const data=useLive?liveRanking:historicalRanking;
+  if(!data)return;
+  $('rankingMeta').textContent=useLive
+    ? (data.complete?'Full seven-day coverage':'Partial seven-day coverage · collected receipts only')+' · '+(data.updatedAt?new Date(data.updatedAt).toLocaleString('en-US'):'waiting')+(data.error?' · ranking update delayed':'')
+    : ($('rankingSource').value==='live'?'Waiting for frequent ranking · showing historical report · ':'')+data.meta+' · '+(data.updatedAt?new Date(data.updatedAt).toLocaleString('en-US'):'');
+  const signature=JSON.stringify([!!useLive,data.rows]);
+  if(signature!==lastRankingSignature){renderRanking(data.rows||[]);lastRankingSignature=signature;}
+}
+$('rankingSource').addEventListener('change',renderPriorityRanking);
 function renderLiveMetrics(){
   const m=lastLiveMetrics;if(!m)return;
   for(const [id,value] of [['liveCount',m.events],['liveFirst',m.first],['livePending',m.pending],['liveLater',m.later],['second24h',m.secondWallets],['liveVolume',m.amountPi]]){
@@ -917,10 +930,11 @@ async function loadLive(){
     if(!response.ok)throw new Error(data.error||'Live service unavailable');
     const age=data.checkedAt?(Date.now()-Date.parse(data.checkedAt))/1000:Infinity;
     const delayed=!!data.error||age>180;
-    $('liveStatus').textContent=delayed?'Delayed':data.backlog||data.backfilling?'Catching up':'Collector online';
+    $('liveStatus').textContent=delayed?'Delayed':data.backlog?'Catching up':'Collector online';
     $('liveStatus').className='chip '+(delayed?'bad':'good');
-    $('liveFreshness').textContent=(data.checkedAt?'Last successful collection: '+new Date(data.checkedAt).toLocaleString('en-US'):'No successful collection yet')+(data.error?' · '+data.error:'')+(data.backfilling?' · Recovering up to 24 hours before activation; partial amounts.':'')+(data.backlog?' · New operations are queued; partial amounts.':'');
+    $('liveFreshness').textContent=(data.checkedAt?'Last successful collection: '+new Date(data.checkedAt).toLocaleString('en-US'):'No successful collection yet')+(data.error?' · '+data.error:'')+(data.backfilling?(data.backfillPaused?' · Older recovery paused to prioritize new migrations.':' · Recovering older receipts in the background.'):'')+(data.backlog?' · New operations are queued; partial coverage.':'');
     lastLiveMetrics=data.metrics24h||null;renderLiveMetrics();
+    liveRanking=data.ranking||null;renderPriorityRanking();
   }catch(error){$('liveStatus').textContent='Unavailable';$('liveStatus').className='chip bad';$('liveFreshness').textContent=error.message+' · Previously displayed receipts may be stale.';}
   finally{liveLoading=false;}
 }

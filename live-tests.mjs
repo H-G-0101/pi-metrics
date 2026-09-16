@@ -49,4 +49,35 @@ snapshot=JSON.parse(sql.prepare('SELECT snapshot FROM live_control').get().snaps
 assert.equal(liveRound({policyVersion:29,genesis:true,events:[{hash:'first'},{hash:'second'}]},'second'),2);
 assert.equal(liveRound({policyVersion:29,genesis:true,ambiguous:true,events:[{hash:'second'}]},'second'),null);
 assert.equal(liveReceipt({...op(9,'1'),claimants:[{destination:'A'},{destination:'B'}]}),null);
+// Exhausted old recovery cannot consume the budget reserved for new migrations.
+sql.prepare('UPDATE live_control SET state=?,snapshot=NULL').run(JSON.stringify({...state(),cursor:'202',writes:32000,backfill:'1',backfillWrites:3000}));
+let oldRequests=0;
+globalThis.fetch=async url=>{const u=new URL(url);if(u.searchParams.get('order')==='desc')oldRequests++;
+ const records=u.searchParams.get('cursor')==='202'?[op(203,'2','third')]:[];
+ return {ok:true,json:async()=>({_embedded:{records}})};
+};
+await collectLive({DB});
+assert.equal(state().cursor,'203');assert.equal(state().backfill,'1');assert.equal(oldRequests,0);
+snapshot=JSON.parse(sql.prepare('SELECT snapshot FROM live_control').get().snapshot);
+assert.equal(snapshot.backfillPaused,true);assert.equal(snapshot.error,null);
+assert.equal(snapshot.metrics24h.events,3);
+assert.equal(snapshot.ranking.rows[0].amountPi,'2.7000000','Top 20 sums all observed recipient transactions');
+assert.equal(snapshot.ranking.complete,false,'recent coverage must not claim a full week');
+// A busy source gets six forward pages; old recovery never runs behind that queue.
+let forwardPages=0;
+globalThis.fetch=async url=>{const u=new URL(url);assert.equal(u.searchParams.get('order'),'asc');forwardPages++;
+ const cursor=Number(u.searchParams.get('cursor'));
+ const records=Array.from({length:200},(_,i)=>({type:'payment',paging_token:String(cursor+i+1),created_at:at}));
+ return {ok:true,json:async()=>({_embedded:{records}})};
+};
+await collectLive({DB});assert.equal(forwardPages,6);assert.equal(state().backlog,true);
+// Rank every observed wallet, not just the latest twenty transfers.
+sql.prepare('UPDATE live_control SET snapshot=NULL').run();
+let delivered=false;
+globalThis.fetch=async()=>{const cursor=Number(state().cursor);const records=delivered?[]:Array.from({length:25},(_,i)=>({...op(cursor+i+1,String(25-i),'rank-'+i),claimants:[{destination:'W'+String(i).padStart(2,'0')}]}));delivered=true;
+ return {ok:true,json:async()=>({_embedded:{records}})};
+};
+await collectLive({DB});snapshot=JSON.parse(sql.prepare('SELECT snapshot FROM live_control').get().snapshot);
+assert.equal(snapshot.ranking.rows.length,20);assert.equal(snapshot.ranking.rows[0].address,'W00');assert.equal(snapshot.ranking.rows.at(-1).address,'W19');
+assert.equal(snapshot.metrics24h.events,28);
 sql.close();console.log('PASS live: split pages, exact sums, rollback, restart, duplicate prevention, lease, quota, pending and verified evidence');
