@@ -415,15 +415,17 @@ function ago(iso){
 }
 
 function setupRefinedLayout(){
-  const live=document.createElement('section');live.className='section panel live-panel';live.id='liveReceipts';
-  live.innerHTML='<div class="section-head"><div><div class="kicker">Independent collection</div><h2>Live migration receipts</h2><p>Latest 20 detected events · collection scheduled every minute</p></div><span id="liveStatus" class="chip">Connecting…</span></div><p id="liveFreshness" class="quality-note">Checking collector…</p><div id="liveList" class="live-list"></div><p class="panel-sub">Receipts appear before historical classification. Amounts may be partial while catching up. Lifetime totals and historical charts below update separately.</p>';
-  $('firstTotal').closest('section').before(live);
   const overview=$('firstTotal').closest('section');overview.id='recent';
   const lifetime=document.createElement('section');lifetime.className='section';lifetime.id='lifetime';
   lifetime.innerHTML='<div class="section-head"><div><div class="kicker">Cumulative wallet counts</div><h2>Lifetime migrations</h2><p>Persisted indexed wallets · not limited to 15 days</p></div></div><div class="lifetime-grid"></div><p class="quality-note" id="qualityNote">Checking data coverage…</p>';
   overview.before(lifetime);
   for(const id of ['firstTotal','secondTotal'])lifetime.querySelector('.lifetime-grid').append($(id).closest('article'));
-  overview.querySelector('h2').textContent='Recent activity';
+  overview.querySelector('h2').textContent='Migration overview';
+  const live=document.createElement('div');live.innerHTML='<span id="liveStatus" class="chip">Connecting…</span><p id="liveFreshness" class="quality-note">Checking frequent collection…</p>';
+  overview.querySelector('.stats').before(live);
+  for(const [id,label] of [['liveCount','Migration events · 24h'],['liveFirst','Confirmed 1st events · 24h'],['livePending','Pending classification · 24h'],['liveLater','Confirmed later events · 24h'],['liveVolume','Pi received · 24h']]){
+    const card=document.createElement('article');card.className='stat blue';card.innerHTML='<div class="stat-label">'+label+'</div><div class="stat-value" id="'+id+'">—</div><div class="stat-sub">Frequent collection · waiting</div>';overview.querySelector('.stats').prepend(card);
+  }
   overview.querySelector('.section-head p').textContent='Rolling windows · each metric shows its own period';
   const origin=document.createElement('div');origin.className='origin';
   origin.innerHTML='<div><div class="l">Migration wallet</div><div class="addr" id="originWallet">—</div></div>'
@@ -810,6 +812,7 @@ async function loadMigration(){
     renderLargest24h(insightsReady?insights.largest24h:null);
     renderRanking(Array.isArray(stats.weeklyMigrationRanking)?stats.weeklyMigrationRanking:[]);
     compactCardNumbers();
+    renderLiveMetrics();
     networkStatus(true);
   }catch(error){
     $('indexChip').className='chip bad';$('indexChip').textContent='statistics unavailable';
@@ -897,7 +900,14 @@ async function fetchJson(path){
 $('lookBtn').addEventListener('click',lookup);
 $('addr').addEventListener('keydown',event=>{if(event.key==='Enter')lookup()});
 setupRefinedLayout();
-let liveLoading=false;
+let liveLoading=false,lastLiveMetrics=null;
+function renderLiveMetrics(){
+  const m=lastLiveMetrics;if(!m)return;
+  for(const [id,value] of [['liveCount',m.events],['liveFirst',m.first],['livePending',m.pending],['liveLater',m.later],['second24h',m.secondWallets],['liveVolume',m.amountPi]]){
+    const el=$(id);el.textContent=(m.complete?'':'≥ ')+(id==='liveVolume'?fmtPi(value,7)+' Pi':fmt(value));
+    el.closest('article').querySelector('.stat-sub').textContent=m.complete?'Frequent collection · past 24 hours':'Partial coverage · observed so far';
+  }
+}
 async function loadLive(){
   if(liveLoading||document.hidden)return;
   liveLoading=true;
@@ -910,19 +920,7 @@ async function loadLive(){
     $('liveStatus').textContent=delayed?'Delayed':data.backlog||data.backfilling?'Catching up':'Collector online';
     $('liveStatus').className='chip '+(delayed?'bad':'good');
     $('liveFreshness').textContent=(data.checkedAt?'Last successful collection: '+new Date(data.checkedAt).toLocaleString('en-US'):'No successful collection yet')+(data.error?' · '+data.error:'')+(data.backfilling?' · Recovering up to 24 hours before activation; partial amounts.':'')+(data.backlog?' · New operations are queued; partial amounts.':'');
-    const fragment=document.createDocumentFragment();
-    for(const event of data.events||[]){
-      const card=document.createElement('article');card.className='live-receipt';
-      const title=document.createElement('b');title.textContent=shortAddress(event.address);card.append(title);
-      const amount=document.createElement('strong');amount.textContent=event.amountPi+' Pi';card.append(amount);
-      const meta=document.createElement('p');meta.textContent=new Date(event.at).toLocaleString('en-US')+' · '+event.lockups+' lockups';card.append(meta);
-      const status=document.createElement('span');status.className=event.migrationNumber?'live-confirmed':'live-pending';status.textContent=event.migrationNumber?ordinal(event.migrationNumber)+' confirmed':'Received · classification pending';card.append(status);
-      const copy=document.createElement('button');copy.className='mobile-copy';copy.textContent='Copy wallet';copy.dataset.address=event.address;copy.onclick=()=>copyWallet(copy);card.append(copy);
-      if(/^[a-f0-9]{64}$/i.test(event.hash)){const link=document.createElement('a');link.href='/horizon/transactions/'+event.hash;link.target='_blank';link.rel='noopener';link.textContent='View transaction ↗';card.append(link);}
-      fragment.append(card);
-    }
-    if(!fragment.childNodes.length){const empty=document.createElement('p');empty.textContent='No receipts collected yet. This does not mean no migrations occurred.';fragment.append(empty);}
-    $('liveList').replaceChildren(fragment);
+    lastLiveMetrics=data.metrics24h||null;renderLiveMetrics();
   }catch(error){$('liveStatus').textContent='Unavailable';$('liveStatus').className='chip bad';$('liveFreshness').textContent=error.message+' · Previously displayed receipts may be stale.';}
   finally{liveLoading=false;}
 }

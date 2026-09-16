@@ -32,6 +32,10 @@ assert.equal(sql.prepare('SELECT COUNT(*) n FROM live_receipt_ops').get().n,2,'b
 await collectLive({DB});assert.equal(state().cursor,'202');
 let snapshot=JSON.parse(sql.prepare('SELECT snapshot FROM live_control').get().snapshot);
 assert.equal(snapshot.events.length,2);assert.equal(snapshot.events[0].migrationNumber,null,'receipt does not imply round');
+assert.equal(snapshot.metrics24h.events,2);assert.equal(snapshot.metrics24h.pending,2);assert.equal(snapshot.metrics24h.amountPi,'0.7000000');
+sql.prepare('INSERT INTO sync_state(name,cursor) VALUES (?,?)').run('evidence:A',JSON.stringify({policyVersion:29,genesis:true,events:[{hash:'h'},{hash:'second'}]}));
+await collectLive({DB});snapshot=JSON.parse(sql.prepare('SELECT snapshot FROM live_control').get().snapshot);
+assert.equal(snapshot.metrics24h.first,1);assert.equal(snapshot.metrics24h.second,1);assert.equal(snapshot.metrics24h.secondWallets,1);assert.equal(snapshot.metrics24h.pending,0);
 // Replay a committed page: no duplicate event or Pi.
 sql.prepare('UPDATE live_control SET state=?').run(JSON.stringify({...state(),cursor:'201'}));
 await collectLive({DB});assert.equal(sql.prepare('SELECT COUNT(*) n FROM live_receipt_ops').get().n,3);

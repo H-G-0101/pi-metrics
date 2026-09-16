@@ -7,6 +7,7 @@ export const liveSchema=[
   'CREATE TABLE IF NOT EXISTS live_receipt_ops (id TEXT PRIMARY KEY, address TEXT NOT NULL, hash TEXT NOT NULL, at TEXT NOT NULL, units INTEGER NOT NULL)',
   'CREATE TABLE IF NOT EXISTS live_receipts (address TEXT NOT NULL, hash TEXT NOT NULL, at TEXT NOT NULL, units INTEGER NOT NULL, lockups INTEGER NOT NULL, PRIMARY KEY(address,hash))',
   'CREATE INDEX IF NOT EXISTS live_receipts_date ON live_receipts(at DESC)',
+  'CREATE TABLE IF NOT EXISTS sync_state (name TEXT PRIMARY KEY, cursor TEXT, updated_at TEXT)',
   'CREATE TRIGGER IF NOT EXISTS live_receipt_insert AFTER INSERT ON live_receipt_ops BEGIN INSERT INTO live_receipts(address,hash,at,units,lockups) VALUES(new.address,new.hash,new.at,new.units,1) ON CONFLICT(address,hash) DO UPDATE SET units=live_receipts.units+new.units,lockups=live_receipts.lockups+1; END',
 ];
 export function liveReceipt(op){
@@ -80,6 +81,10 @@ export async function collectLive(env){
     state.checkedAt=new Date().toISOString();
   }catch(error){problem=error.message;console.error('Live collector:',problem);}
   try{
+    const from=new Date(Date.now()-86400000).toISOString();
+    const totals=await env.DB.prepare("WITH classified AS (SELECT r.*, CASE WHEN json_extract(s.cursor,'$.policyVersion')=29 AND json_extract(s.cursor,'$.genesis')=1 AND COALESCE(json_extract(s.cursor,'$.ambiguous'),0)=0 THEN (SELECT CAST(j.key AS INTEGER)+1 FROM json_each(s.cursor,'$.events') j WHERE json_extract(j.value,'$.hash')=r.hash LIMIT 1) ELSE NULL END AS round FROM live_receipts r LEFT JOIN sync_state s ON s.name='evidence:'||r.address WHERE r.at>=?1) SELECT COUNT(*) AS events,COUNT(DISTINCT address) AS wallets,COALESCE(SUM(round=1),0) AS first,COALESCE(SUM(round=2),0) AS second,COUNT(DISTINCT CASE WHEN round=2 THEN address END) AS secondWallets,COALESCE(SUM(round>2),0) AS later,COALESCE(SUM(round IS NULL),0) AS pending,CAST(COALESCE(SUM(units),0) AS TEXT) AS units FROM classified").bind(from).first();
+    const totalUnits=BigInt(totals.units);
+    const metrics24h={...totals,amountPi:(totalUnits/10000000n)+'.'+String(totalUnits%10000000n).padStart(7,'0'),from,complete:!!state.cutoff&&state.cutoff<=from&&!state.backfill&&!state.backlog&&!problem};
     const results=await env.DB.prepare('SELECT address,hash,at,CAST(units AS TEXT) AS units,lockups FROM live_receipts ORDER BY at DESC,address,hash LIMIT 20').all();
     const events=[];
     for(const row of results.results||[]){
@@ -88,7 +93,7 @@ export async function collectLive(env){
       const units=BigInt(row.units);
       events.push({...row,amountPi:(units/10000000n)+'.'+String(units%10000000n).padStart(7,'0'),migrationNumber:liveRound(evidence,row.hash)});
     }
-    const snapshot=JSON.stringify({version:30,source:LIVE_SOURCE,checkedAt:state.checkedAt||null,reportedAt:new Date().toISOString(),startedAt:state.startedAt||null,backfilling:!!state.backfill,backlog:!!state.backlog,error:problem,events});
+    const snapshot=JSON.stringify({version:31,metrics24h,source:LIVE_SOURCE,checkedAt:state.checkedAt||null,reportedAt:new Date().toISOString(),startedAt:state.startedAt||null,backfilling:!!state.backfill,backlog:!!state.backlog,error:problem,events});
     await env.DB.prepare('UPDATE live_control SET snapshot=?1 WHERE id=1 AND owner=?2').bind(snapshot,owner).run();
   }finally{
     await env.DB.prepare('UPDATE live_control SET state=?1,lease_until=0,owner=NULL WHERE id=1 AND owner=?2').bind(JSON.stringify(state),owner).run();
