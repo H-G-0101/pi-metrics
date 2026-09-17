@@ -1,4 +1,8 @@
-# Pi Migration Monitor — v39
+# Pi Migration Monitor — v40
+
+## Novidade da v40
+
+Volumes acumulados de Pi para primeira e segunda migrações, abaixo de cada contador, abreviados K/M e com valor completo no tooltip. Somam os bloqueios dos eventos confirmados desde o início do monitor; pendentes entram após confirmação. Não são saldos atuais e não diminuem com saques ou desbloqueios. Na atualização, uma leitura inicial das tabelas focus recupera os valores já registrados; depois os totais são atualizados incrementalmente, na mesma transação dos contadores. Sem novas consultas à blockchain, novas tabelas ou reset do período.
 
 ## Novidade da v39 — perfil Workers Paid
 

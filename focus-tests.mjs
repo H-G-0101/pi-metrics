@@ -26,8 +26,9 @@ assert.equal(snapshot().lastMigrationHash,'unknown','pending receipts also count
 chain.push({...op(111,'A','payment'),type:'payment'});await collectFocus({DB});assert.equal(snapshot().lastMigrationHash,'unknown','payments do not replace the last migration');
 balanceFail=true;
 assert.equal(calls.filter(c=>c.address===SOURCE&&c.order==='desc').length,1,'only one latest-operation anchor; no source backfill');assert.equal(calls.find(c=>c.address===SOURCE&&c.order==='desc').limit,1);
+assert.deepEqual(snapshot().volumes,{firstPi:'3.3000000',secondPi:'30.0000000'},'combined lockups, replay, rollback, pending and third events preserve exact totals');
 const RealDate=Date,clock=Date.now()+8*86400000;globalThis.Date=class extends RealDate{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
-await collectFocus({DB});assert.equal(snapshot().ranking.rows.length,0,'seven-day ranking expires old receipts');assert.equal(state().counts.first,2);assert.equal(state().counts.second,2,'cumulative counters do not expire');assert.equal(sql.prepare('SELECT COUNT(*) n FROM focus_events').get().n,6,'stored receipts remain');globalThis.Date=RealDate;
+await collectFocus({DB});assert.equal(snapshot().ranking.rows.length,0,'seven-day ranking expires old receipts');assert.equal(state().counts.first,2);assert.equal(state().counts.second,2,'cumulative counters do not expire');assert.equal(sql.prepare('SELECT COUNT(*) n FROM focus_events').get().n,6,'stored receipts remain');globalThis.Date=RealDate;assert.deepEqual(snapshot().volumes,{firstPi:'3.3000000',secondPi:'30.0000000'},'cumulative Pi never expires with the ranking');
 const before=calls.length;sql.prepare('UPDATE focus_control SET lease_until=?').run(Date.now()+60000);await collectFocus({DB});assert.equal(calls.length,before,'overlapping collector never reads blockchain');
 assert.equal(snapshot().sourceAccount.balance,'1234567.1234567','failed balance update preserves last known balance');assert.match(snapshot().sourceAccount.error,/503/);assert.equal(snapshot().error,null,'balance failure does not stop migration collection');
 // A failed activation must never import the same legacy usage repeatedly.
@@ -84,4 +85,11 @@ const pausedRequests=requests;await collectFocus({DB});assert.equal(requests,pau
 assert.equal(state().counts.second,12,'API error preserves successful classifications');
 globalThis.fetch=underlyingFetch;
 console.log('PASS v39: 12 histories per run, maximum four simultaneous requests, 429 cooldown and preserved progress');
+assert.deepEqual(snapshot().volumes,{firstPi:'0.0000000',secondPi:'12.0000000'});
+const upgrade=state();delete upgrade.volumeUnits;
+sql.prepare('UPDATE focus_control SET state=?').run(JSON.stringify(upgrade));
+await collectFocus({DB});
+assert.deepEqual(snapshot().volumes,{firstPi:'0.0000000',secondPi:'12.0000000'},'upgrade reconstructs already confirmed totals without resetting the epoch');
+assert.equal(state().startedAt,upgrade.startedAt);
+console.log('PASS v40: exact cumulative Pi, one-time upgrade, no expiry or double counting');
 sql.close();console.log('PASS focus: activation boundary, exact combined lockups, distinct counters, targeted history, replay, atomic rollback, later and ambiguous cases, ranking expiry, preserved history and lease');

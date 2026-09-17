@@ -88,6 +88,7 @@ export async function collectFocus(env){
   function prepareChanges(addresses,previous,events,evidence,next,retryAt){
     const changed=[],wallets=[];
     next.counts={...state.counts};
+    next.volumeUnits={...state.volumeUnits};
     for(const address of addresses){
       const before=previous.filter(e=>e.address===address),after=events.filter(e=>e.address===address),proof=evidence.get(address);
       for(const event of after){
@@ -97,12 +98,22 @@ export async function collectFocus(env){
       }
       const a=counts(before),b=counts(after);
       for(const k of ['first','second','pending'])next.counts[k]+=b[k]-a[k];
+      for(const [key,round] of [['first',1],['second',2]]){
+        const sum=rows=>rows.filter(e=>e.round===round).reduce((total,e)=>total+BigInt(e.units),0n);
+        next.volumeUnits[key]=String(BigInt(next.volumeUnits[key]||'0')+sum(after)-sum(before));
+      }
       const retry=retryAt&&proof.complete&&(!proof.genesis||proof.ambiguous)?new Date(Date.now()+86400000).toISOString():retryAt;
       wallets.push({address,evidence:JSON.stringify(proof),pending:b.pending,retry_at:retry||new Date().toISOString()});
     }
     return {changed,wallets};
   }
   try{
+    // One-time upgrade from stored epoch receipts; no blockchain backfill.
+    if(!state.volumeUnits){
+      const rows=(await DB.prepare('SELECT round,CAST(SUM(CAST(units AS INTEGER)) AS TEXT) AS units FROM focus_events WHERE round IN (1,2) GROUP BY round').all()).results||[];
+      state.volumeUnits={first:'0',second:'0'};
+      for(const row of rows)state.volumeUnits[row.round===1?'first':'second']=row.units;
+    }
     if(!state.lastMigrationLoaded){
       const latest=await DB.prepare('SELECT at,hash FROM focus_events ORDER BY at DESC LIMIT 1').first();
       state.lastMigrationAt=latest?.at||null;state.lastMigrationHash=latest?.hash||null;state.lastMigrationLoaded=true;
@@ -209,7 +220,8 @@ export async function collectFocus(env){
         sourceAccount={address:SOURCE,balance,checkedAt:attemptedAt,attemptedAt,error:null};
       }catch(e){sourceAccount={...(sourceAccount||{address:SOURCE,balance:null,checkedAt:null}),attemptedAt,error:e.message};}
     }
-    const snapshot={version:39,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
+    const volumes=state.startedAt&&state.volumeUnits?{firstPi:decimal(state.volumeUnits.first),secondPi:decimal(state.volumeUnits.second)}:null;
+    const snapshot={version:40,volumes,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
     await DB.prepare('UPDATE focus_control SET snapshot=?1,state=?2,owner=NULL,lease_until=0 WHERE id=1 AND owner=?3').bind(JSON.stringify(snapshot),JSON.stringify(state),owner).run();
   }finally{
     await DB.prepare('UPDATE focus_control SET owner=NULL,lease_until=0 WHERE id=1 AND owner=?1').bind(owner).run();
