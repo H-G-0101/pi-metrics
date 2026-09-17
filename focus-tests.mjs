@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
-import {collectFocus} from './src/focus.mjs';
+import {collectFocus,focusVerificationQueue} from './src/focus.mjs';
 const sql=new DatabaseSync(':memory:');let fail=false;
 const DB={prepare(query){return {query,args:[],bind(...args){this.args=args;return this;},async first(){return sql.prepare(query).get(...this.args);},async all(){return {results:sql.prepare(query).all(...this.args)};},async run(){const r=sql.prepare(query).run(...this.args);return {meta:{changes:Number(r.changes),rows_written:Number(r.changes)}};}};},async batch(statements){sql.exec('BEGIN');try{const out=[];for(const s of statements){if(fail&&s.query.startsWith('UPDATE focus_control SET state')){fail=false;throw new Error('Simulated atomic failure');}if(s.query.startsWith('SELECT'))out.push({results:sql.prepare(s.query).all(...s.args),meta:{changes:0}});else{const r=sql.prepare(s.query).run(...s.args);out.push({results:[],meta:{changes:Number(r.changes)}});}}sql.exec('COMMIT');return out;}catch(e){sql.exec('ROLLBACK');throw e;}}};
 const SOURCE='GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G',at=new Date().toISOString();
@@ -16,7 +16,8 @@ history.A=chain.filter(r=>r.account==='A'||r.claimants?.[0]?.destination==='A');
 sql.prepare('UPDATE focus_control SET state=?').run(JSON.stringify({...state(),cursor:'100'}));await collectFocus({DB});assert.deepEqual(state().counts,{first:1,second:2,pending:0},'replay cannot duplicate counts');assert.equal(sql.prepare('SELECT COUNT(*) n FROM focus_events').get().n,3);
 chain.push(birth(106,'C','C1'),op(107,'C','C1','3'));fail=true;await collectFocus({DB});assert.equal(state().cursor,'105');assert.equal(state().counts.first,1);assert.equal(sql.prepare("SELECT COUNT(*) n FROM focus_events WHERE address='C'").get().n,0,'failure rolls back events, evidence, counters and cursor');
 await collectFocus({DB});assert.equal(state().counts.first,2);
-chain.push(op(108,'A','A3','5'));history.A.push(chain.at(-1));await collectFocus({DB});assert.equal(state().counts.second,2,'third migration cannot inflate second');assert.equal(state().counts.pending,0);
+const savedACursor=JSON.parse(sql.prepare("SELECT evidence FROM focus_wallets WHERE address='A'").get().evidence).cursor;const callStart=calls.length;
+chain.push(op(108,'A','A3','5'));history.A.push(chain.at(-1));await collectFocus({DB});assert.equal(calls.slice(callStart).find(c=>c.address==='A').cursor,savedACursor,'confirmed history resumes from its saved cursor');assert.equal(state().counts.second,2,'third migration cannot inflate second');assert.equal(state().counts.pending,0);
 chain.push({...op(109,'X','ambiguous'),claimants:[{destination:'X'},{destination:'Y'}]});await collectFocus({DB});assert.equal(state().counts.pending,0,'ambiguous recipients are excluded');
 chain.push(op(110,'U','unknown'));history.U=[op(1,'U','earlier'),chain.at(-1)];await collectFocus({DB});assert.equal(state().counts.pending,1,'missing account genesis never implies a migration number');
 const prev=snapshot();prev.ranking.updatedAt='2000-01-01';sql.prepare('UPDATE focus_control SET snapshot=?').run(JSON.stringify(prev));await collectFocus({DB});assert.equal(snapshot().ranking.rows[0].address,'B');assert.equal(snapshot().ranking.rows.find(r=>r.address==='A').amountPi,'15.3000000');
@@ -34,4 +35,25 @@ sql.exec('DELETE FROM focus_control; DELETE FROM focus_events; DELETE FROM focus
 sql.prepare('INSERT INTO live_control VALUES(1,?)').run(JSON.stringify({day:new Date().toISOString().slice(0,10),writes:90000}));
 await collectFocus({DB});const consumed=state().writes;assert.equal(state().startedAt,undefined);assert.match(snapshot().error,/budget/);
 await collectFocus({DB});assert.equal(state().writes,consumed+8,'legacy quota is carried only once, even after failed activation');
+// Queue priority, fairness, retry gates and unused-slot reuse on real SQLite.
+sql.exec('DELETE FROM focus_wallets');
+const insert=sql.prepare('INSERT INTO focus_wallets VALUES(?,?,?,?)');
+for(const a of ['G1','G2','G3','G4','T1','T2','T3','T4'])insert.run(a,'{}',1,'2000-01-01');
+insert.run('FUTURE','{}',1,'2999-01-01');insert.run('DONE','{}',0,'2000-01-01');
+const ranked={rows:['T1','T2','T3','T4','FUTURE','DONE'].map(address=>({address}))};
+assert.deepEqual(await focusVerificationQueue(DB,ranked,at),['G1','T1','T2','T3']);
+sql.prepare("UPDATE focus_wallets SET retry_at='2999-01-01' WHERE address IN ('G1','T1','T2','T3')").run();
+assert.deepEqual(await focusVerificationQueue(DB,ranked,at),['G2','T4','G3','G4']);
+assert.deepEqual(await focusVerificationQueue(DB,null,at),['G2','G3','G4','T4']);
+// One transaction mixes a new account and a second migration for another account.
+sql.exec('DELETE FROM focus_control; DELETE FROM focus_events; DELETE FROM focus_wallets; DROP TABLE live_control');
+chain=[old];await collectFocus({DB});
+chain.push(birth(101,'NEW','mixed'),op(102,'NEW','mixed'),op(103,'EXISTING','mixed','2'),op(104,'EXISTING','mixed','3'));
+history.EXISTING=[birth(1,'EXISTING','first'),op(2,'EXISTING','first'),...chain.slice(-2)];
+await collectFocus({DB});
+assert.equal(sql.prepare("SELECT round FROM focus_events WHERE address='NEW'").get().round,1);
+assert.equal(sql.prepare("SELECT round FROM focus_events WHERE address='EXISTING'").get().round,2);
+assert.equal(sql.prepare("SELECT units FROM focus_events WHERE address='EXISTING'").get().units,'50000000');
+assert.deepEqual(state().counts,{first:1,second:1,pending:0});
+console.log('PASS v38: Top 20 priority, general queue fairness, retry gates, cached cursor reuse and mixed transaction recipients');
 sql.close();console.log('PASS focus: activation boundary, exact combined lockups, distinct counters, targeted history, replay, atomic rollback, later and ambiguous cases, ranking expiry, preserved history and lease');

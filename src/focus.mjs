@@ -37,6 +37,17 @@ async function focusPage(address,cursor,order='asc',limit=200){
 }
 function counts(events){return {first:Number(events.some(e=>e.round===1)),second:Number(events.some(e=>e.round===2)),pending:events.filter(e=>e.round==null).length};}
 function decimal(units){const n=BigInt(units);return (n/10000000n)+'.'+String(n%10000000n).padStart(7,'0');}
+export async function focusVerificationQueue(DB,ranking,now){
+  // Reuse the published ranking; never aggregate the seven-day window per tick.
+  const top=[...new Set((ranking?.rows||[]).slice(0,20).map(r=>r.address))];
+  const general=(await DB.prepare('SELECT address FROM focus_wallets WHERE pending>0 AND retry_at<=?1 ORDER BY retry_at,address LIMIT 4').bind(now).all()).results||[];
+  const priority=top.length?(await DB.prepare('SELECT address FROM focus_wallets WHERE address IN (SELECT value FROM json_each(?1)) AND pending>0 AND retry_at<=?2 ORDER BY retry_at,address LIMIT 3').bind(JSON.stringify(top),now).all()).results||[]:[];
+  // Reserve the first slot for the oldest non-priority candidate, then up to
+  // three Top 20 candidates. Fill unused slots without repeats or extra pages.
+  const selected=new Set(priority.map(r=>r.address));
+  const fair=general.find(r=>!selected.has(r.address));
+  return [...new Set([...(fair?[fair.address]:[]),...priority.map(r=>r.address),...general.map(r=>r.address)])].slice(0,4);
+}
 export async function collectFocus(env){
   if(!env.DB)throw new Error('DB binding required');
   const DB=env.DB;
@@ -135,8 +146,8 @@ export async function collectFocus(env){
   // Targeted verification only: four account-history pages per tick, saved and resumed.
   if(state.startedAt&&!error&&state.historyWrites<historyLimit&&Date.now()-now<35000){
     try{
-      const due=(await DB.prepare('SELECT address FROM focus_wallets WHERE pending>0 AND retry_at<=?1 ORDER BY retry_at,address LIMIT 4').bind(new Date().toISOString()).all()).results||[];
-      const addresses=due.map(r=>r.address),prior=await load(addresses),evidence=prior.wallets;
+      const addresses=await focusVerificationQueue(DB,lease.snapshot?JSON.parse(lease.snapshot).ranking:null,new Date().toISOString());
+      const prior=await load(addresses),evidence=prior.wallets;
       for(const address of addresses){
         const proof=evidence.get(address);
         try{
@@ -179,7 +190,7 @@ export async function collectFocus(env){
         sourceAccount={address:SOURCE,balance,checkedAt:attemptedAt,attemptedAt,error:null};
       }catch(e){sourceAccount={...(sourceAccount||{address:SOURCE,balance:null,checkedAt:null}),attemptedAt,error:e.message};}
     }
-    const snapshot={version:37,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
+    const snapshot={version:38,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
     await DB.prepare('UPDATE focus_control SET snapshot=?1,state=?2,owner=NULL,lease_until=0 WHERE id=1 AND owner=?3').bind(JSON.stringify(snapshot),JSON.stringify(state),owner).run();
   }finally{
     await DB.prepare('UPDATE focus_control SET owner=NULL,lease_until=0 WHERE id=1 AND owner=?1').bind(owner).run();

@@ -14,7 +14,7 @@
 <section class="ranking"><div class="heading"><h2>Top 20 · Pi received</h2><p class="muted">Last 7 days · all migration lockups combined per wallet</p><p class="muted" id="rankingStatus">Waiting for observed receipts</p></div>
 <div class="table-wrap"><table><thead><tr><th>Rank</th><th>Wallet</th><th>Migration</th><th class="amount">Pi received</th></tr></thead><tbody id="rows"></tbody></table></div><div class="empty" id="empty">No receipts recorded in this tracking period yet.</div></section>
 <details><summary>What these numbers mean</summary><p>The two counters include unique wallets with a confirmed first or second migration received after tracking started. They do not represent every migration ever made on Pi Network. They accumulate over time and do not reset after seven days.</p><p>The Top 20 includes observed migration receipts, including those awaiting classification. Its seven-day coverage builds from the tracking start. A wallet can appear in both confirmed counters if it receives both migrations during this period. Later migrations can appear in the Top 20 but do not add to these two counters.</p><p>A migration groups the lockups for the same wallet and transaction. Account history is consulted only when needed to establish its migration number, and verified evidence is saved. No second migration is assumed from the age of an account.</p></details>
-<footer>Independent on-chain monitor · amounts abbreviated with K/M · v37</footer>
+<footer>Independent on-chain monitor · amounts abbreviated with K/M · v38</footer>
 </main><script>
 const $=id=>document.getElementById(id);const full=n=>Number(n).toLocaleString('en-US',{maximumFractionDigits:7});const compact=n=>Number(n)>=1000?new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:2}).format(Number(n)):full(n);const date=s=>new Date(s).toLocaleString('en-US');let loading=false,lastSignature='';
 let sourceInfo=null,lastMigrationAt=null;
@@ -45,7 +45,7 @@ function ranking(data){
  }
 }
 async function refresh(){if(loading||document.hidden)return;loading=true;try{
- const response=await fetch('/live',{cache:'no-store',signal:AbortSignal.timeout(10000)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Collector unavailable');if(![36,37].includes(data.version))throw new Error('Publish the current Worker to activate the simplified monitor');
+ const response=await fetch('/live',{cache:'no-store',signal:AbortSignal.timeout(10000)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Collector unavailable');if(![36,37,38].includes(data.version))throw new Error('Publish the current Worker to activate the simplified monitor');
  sourceInfo=data.sourceAccount||null;lastMigrationAt=data.lastMigrationAt||null;sourceAges();
  $('sourceBalance').textContent=sourceInfo?.balance!=null?compact(sourceInfo.balance)+' Pi':'—';$('sourceBalance').title=sourceInfo?.balance!=null?sourceInfo.balance+' Pi':'Balance unavailable';
  $('period').textContent=data.startedAt?'Tracking since '+date(data.startedAt):'Tracking starts on the first scheduled collection';
