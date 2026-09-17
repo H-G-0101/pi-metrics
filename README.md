@@ -1,6 +1,20 @@
-# Pi Migration Monitor — v38
+# Pi Migration Monitor — v39
 
-## Novidade da v38
+## Novidade da v39 — perfil Workers Paid
+
+Até 80 páginas de histórico por execução, em lotes de quatro consultas paralelas. Prazo de 45 segundos para iniciar novos lotes; cada chamada tem timeout de 10 segundos. Gravação atômica por lote, reaproveitamento do cursor e pausa histórica de cinco minutos em HTTP 429/5xx. A coleta de recebimentos continua independente dessa pausa. Top 20 é priorizado e a fila geral continua avançando.
+
+Configuração no wrangler.toml (publique o arquivo junto com worker.js):
+- FOCUS_HISTORY_PAGES = 80 (máximo 80)
+- FOCUS_HISTORY_CONCURRENCY = 4 (máximo 4)
+- FOCUS_DAILY_WRITE_BUDGET = 1000000
+- FOCUS_HISTORY_WRITE_BUDGET = 400000 (incluído no orçamento total)
+
+Se publicar somente worker.js pelo painel, atualize também essas quatro variáveis em Settings: valores antigos de 85000/5000 prevalecem sobre os padrões novos. Não precisa alterar ou apagar DB, iniciar novo período ou executar GitHub Actions. Verifique v39 no rodapé.
+
+Os orçamentos são estimativas internas diárias, não medição de faturamento nem garantia de ficar dentro da franquia mensal. Outros serviços, índices e operações auxiliares também consomem D1. Acompanhe as métricas reais no Cloudflare. O ritmo depende da API, tamanho dos históricos e cota; 80 é um teto, não garantia por minuto.
+
+## Histórico: novidade da v38
 
 A verificação usa o Top 20 já publicado (cache de até 5 minutos), sem recalcular o ranking a cada execução. Até três consultas históricas priorizam suas carteiras pendentes e uma atende a fila geral. Vagas livres são reaproveitadas, sempre com no máximo quatro páginas por execução e respeitando o orçamento histórico existente. Carteiras em espera por erro mantêm seu prazo de tentativa. A prioridade não garante confirmação imediata quando há limite de cota ou histórico incompleto.
 
@@ -22,7 +36,7 @@ Versão enxuta: carteiras com primeira migração confirmada, carteiras com segu
 2. Publique o Worker com o wrangler.toml. O binding `DB` continua apontando para `pi-migrations`; o Cron continua `* * * * *`.
 3. Se uma Action antiga ainda estiver rodando, cancele essa execução uma vez. O novo workflow não tem agendamento e não executa crawler. O arquivo de entrada antigo também foi substituído por um aviso sem coleta.
 4. Aguarde a primeira execução do Cron. Ela cria automaticamente as tabelas `focus_*` no banco existente e salva o cursor da última operação da carteira de migração.
-5. Verifique `/live`: a resposta deve ter `version: 38`, `startedAt` e depois `checkedAt` avançando. A página informa atraso ou falha em vez de apresentar uma coleta parada como atual.
+5. Verifique `/live`: a resposta deve ter `version: 39`, `startedAt` e depois `checkedAt` avançando. A página informa atraso ou falha em vez de apresentar uma coleta parada como atual.
 
 Não exclua o banco, o KV nem os checkpoints antigos. Esta versão não depende de GitHub Actions. Publicar somente um HTML não ativa o novo coletor; é necessário publicar o Worker gerado. Se você cola worker.js no painel, mantenha o Cron e o binding DB configurados. As novas variáveis são `FOCUS_DAILY_WRITE_BUDGET=85000` e `FOCUS_HISTORY_WRITE_BUDGET=5000`, também valores padrão do código.
 

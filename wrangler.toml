@@ -6,8 +6,10 @@ compatibility_date = "2025-01-01"
 crons = ["* * * * *"]
 
 [vars]
-FOCUS_DAILY_WRITE_BUDGET = "85000"
-FOCUS_HISTORY_WRITE_BUDGET = "5000"
+FOCUS_HISTORY_PAGES = "80"
+FOCUS_HISTORY_CONCURRENCY = "4"
+FOCUS_DAILY_WRITE_BUDGET = "1000000"
+FOCUS_HISTORY_WRITE_BUDGET = "400000"
 
 # KV pra guardar a estatística de migração.
 # Pegue o id em: Cloudflare > Storage & Databases > KV (id do namespace STATS)

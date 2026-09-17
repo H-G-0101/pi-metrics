@@ -33,8 +33,8 @@ assert.equal(snapshot().sourceAccount.balance,'1234567.1234567','failed balance 
 // A failed activation must never import the same legacy usage repeatedly.
 sql.exec('DELETE FROM focus_control; DELETE FROM focus_events; DELETE FROM focus_wallets; CREATE TABLE live_control(id INTEGER PRIMARY KEY,state TEXT)');
 sql.prepare('INSERT INTO live_control VALUES(1,?)').run(JSON.stringify({day:new Date().toISOString().slice(0,10),writes:90000}));
-await collectFocus({DB});const consumed=state().writes;assert.equal(state().startedAt,undefined);assert.match(snapshot().error,/budget/);
-await collectFocus({DB});assert.equal(state().writes,consumed+8,'legacy quota is carried only once, even after failed activation');
+await collectFocus({DB,FOCUS_DAILY_WRITE_BUDGET:85000});const consumed=state().writes;assert.equal(state().startedAt,undefined);assert.match(snapshot().error,/budget/);
+await collectFocus({DB,FOCUS_DAILY_WRITE_BUDGET:85000});assert.equal(state().writes,consumed+8,'legacy quota is carried only once, even after failed activation');
 // Queue priority, fairness, retry gates and unused-slot reuse on real SQLite.
 sql.exec('DELETE FROM focus_wallets');
 const insert=sql.prepare('INSERT INTO focus_wallets VALUES(?,?,?,?)');
@@ -56,4 +56,32 @@ assert.equal(sql.prepare("SELECT round FROM focus_events WHERE address='EXISTING
 assert.equal(sql.prepare("SELECT units FROM focus_events WHERE address='EXISTING'").get().units,'50000000');
 assert.deepEqual(state().counts,{first:1,second:1,pending:0});
 console.log('PASS v38: Top 20 priority, general queue fairness, retry gates, cached cursor reuse and mixed transaction recipients');
+// Paid throughput and API backoff preserve completed batches and failed cursors.
+sql.exec('DELETE FROM focus_control; DELETE FROM focus_events; DELETE FROM focus_wallets');
+chain=[old];await collectFocus({DB});
+for(let i=0;i<12;i++){
+ const address='PAID'+i;
+ const receipt=op(200+i,address,'new'+i);
+ chain.push(receipt);history[address]=[birth(1,address,'old'+i),op(2,address,'old'+i),receipt];
+}
+const underlyingFetch=globalThis.fetch;let active=0,peak=0,requests=0,apiFail=false;
+globalThis.fetch=async url=>{
+ const u=new URL(url),address=u.pathname.split('/')[2];
+ if(address.startsWith('PAID')&&u.pathname.endsWith('/operations')){
+  active++;peak=Math.max(peak,active);requests++;
+  await new Promise(resolve=>setTimeout(resolve,2));
+  active--;
+  if(apiFail)return {ok:false,status:429};
+ }
+ return underlyingFetch(url);
+};
+await collectFocus({DB});
+assert.equal(requests,12);assert.equal(peak,4);assert.equal(state().counts.second,12);
+chain.push(op(300,'PAIDFAIL','failure'));apiFail=true;
+await collectFocus({DB});assert.ok(state().historyPauseUntil>Date.now());
+assert.equal(JSON.parse(sql.prepare("SELECT evidence FROM focus_wallets WHERE address='PAIDFAIL'").get().evidence).cursor,'');
+const pausedRequests=requests;await collectFocus({DB});assert.equal(requests,pausedRequests,'backoff prevents historical API calls');
+assert.equal(state().counts.second,12,'API error preserves successful classifications');
+globalThis.fetch=underlyingFetch;
+console.log('PASS v39: 12 histories per run, maximum four simultaneous requests, 429 cooldown and preserved progress');
 sql.close();console.log('PASS focus: activation boundary, exact combined lockups, distinct counters, targeted history, replay, atomic rollback, later and ambiguous cases, ranking expiry, preserved history and lease');
