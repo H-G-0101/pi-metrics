@@ -8,7 +8,7 @@ const DB={prepare(query){return {query,args:[],bind(...args){this.args=args;retu
 for(const q of focusSchema)sql.exec(q);
 sql.prepare('UPDATE focus_control SET state=?,snapshot=?').run('{"live":"preserved"}','{"live":"preserved"}');
 const SOURCE='GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G';
-const dates={1:'2024-01-01T00:00:00Z',2:'2025-01-31T23:59:59Z',3:'2025-02-01T00:00:00Z',4:'2025-02-01T00:00:05Z',5:'2025-02-02T00:00:00Z',6:'2026-09-17T00:00:00Z'};
+const dates={1:'2024-01-01T00:00:00Z',2:'2026-01-31T23:59:59Z',3:'2026-02-01T00:00:00Z',4:'2026-02-01T00:00:05Z',5:'2026-02-02T00:00:00Z',6:'2026-09-17T00:00:00Z'};
 const op=(id,address,hash,amount='1',created_at=dates[4])=>({type:'create_claimable_balance',source_account:SOURCE,asset:'native',transaction_successful:true,transaction_hash:hash,paging_token:String(id),id:String(id),created_at,amount,claimants:[{destination:address}]});
 const birth=(id,address,hash,created_at)=>({...op(id,address,hash,'1',created_at),type:'create_account',account:address});
 let chain=[birth(10,'A','oldA',dates[1]),op(11,'A','oldA','100',dates[1]),op(40,'A','newA','2'),op(41,'A','newA','3'),birth(42,'B','mixed',dates[4]),op(43,'B','mixed','10'),op(44,'C','mixed','7'),{...op(60,'X','tail','1',dates[6]),type:'payment'}];

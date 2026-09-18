@@ -1,6 +1,6 @@
 import {collectFocus} from './focus.mjs';
 
-export const HISTORICAL_SINCE='2025-02-01T00:00:00.000Z';
+export const HISTORICAL_SINCE='2026-02-01T00:00:00.000Z';
 const HIST_SOURCE='GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G';
 async function historicalJSON(path){
   const r=await fetch('https://api.mainnet.minepi.com'+path,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(10000)});
