@@ -1,4 +1,30 @@
-# Pi Migration Monitor — v40
+# Pi Migration Monitor — v41
+
+## Novidade da v41 — Historical 2nd migrations
+
+Nova seção azul na home, separada dos contadores desde a ativação. Mostra carteiras com segunda migração confirmada e Pi acumulado a partir de **01/02/2025 00:00 UTC**, com data alcançada pela varredura, data-alvo e pendências. A data define o recorte de busca; não afirma que segundas migrações começaram nessa data. O escopo é exclusivamente a carteira de migração exibida no site.
+
+### Publicação
+
+Publique o projeto completo, incluindo **worker.js e wrangler.toml**. Mantenha o banco e os dados atuais. O novo Cron `*/5 * * * *` executa a recuperação a cada cinco minutos; o Cron `* * * * *` continua dedicado ao monitor atual. Se publicar pelo editor do Cloudflare, adicione também o novo Cron no painel. Não precisa de GitHub Actions ou comandos SQL manuais. Confira v41 no rodapé e a resposta de `/historical`.
+
+As tabelas `historical_control`, `historical_events` e `historical_wallets` são criadas automaticamente no mesmo D1, com cursor e trava separados das tabelas `focus_*`. Nenhum total histórico é somado ao contador atual; há sobreposição entre os períodos. Não some os dois cartões.
+
+### Como a recuperação funciona
+
+Primeiro localiza o primeiro ledger do período por busca binária, em etapas salvas. Isso pode levar várias execuções de cinco minutos. Usa o token real da primeira operação do ledger e trata ledgers sem operações. Se a API não disponibilizar os ledgers necessários, mostra erro e não presume cobertura.
+
+Depois lê até seis páginas de operações da carteira de origem por execução, até a data-alvo registrada, e confirma até 40 páginas de históricos de destinatários, com duas requisições simultâneas. Verifica histórico anterior a fevereiro quando necessário para estabelecer a ordem. Cada evento é agrupado por destinatário e transação; um ou vários bloqueios não mudam essa regra. First migrations presentes no mesmo lote não são contadas como second migrations. Progresso e valores são gravados atomicamente, sem duplicação em retomadas. Quando alcança a data-alvo, passa a buscar os novos recebimentos nas próximas execuções.
+
+O rótulo **Partial** permanece enquanto a varredura ou classificação estiver incompleta. **Caught up** significa que alcançou a data-alvo exibida e classificou os recebimentos encontrados, não uma garantia de cobertura de outras carteiras de origem ou registros ausentes na API. Ausência da criação da conta no histórico mantém a classificação pendente.
+
+### Consumo e controles
+
+- HISTORICAL_ENABLED = "true"; mudar para "false" pausa só a recuperação e preserva seus dados.
+- HISTORICAL_DAILY_WRITE_BUDGET = "250000": teto diário estimado deste coletor.
+- HISTORICAL_VERIFICATION_WRITE_BUDGET = "150000": parte do teto anterior reservada à verificação.
+
+São orçamentos adicionais aos do coletor atual. O banco, franquia, armazenamento e capacidade da API são compartilhados: a recuperação acrescenta consumo, apesar de não bloquear o agendamento da coleta atual. Os limites internos são estimativas, não garantia de custo/faturamento. Monitore as métricas reais e pause a recuperação se necessário. Não há prazo de conclusão garantido. O agendamento, implantação e disponibilidade do histórico real precisam ser verificados após publicar; os testes locais usam fixtures.
 
 ## Novidade da v40
 

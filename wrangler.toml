@@ -3,9 +3,12 @@ main = "worker.js"
 compatibility_date = "2025-01-01"
 
 [triggers]
-crons = ["* * * * *"]
+crons = ["* * * * *", "*/5 * * * *"]
 
 [vars]
+HISTORICAL_ENABLED = "true"
+HISTORICAL_DAILY_WRITE_BUDGET = "250000"
+HISTORICAL_VERIFICATION_WRITE_BUDGET = "150000"
 FOCUS_HISTORY_PAGES = "80"
 FOCUS_HISTORY_CONCURRENCY = "4"
 FOCUS_DAILY_WRITE_BUDGET = "1000000"

@@ -50,7 +50,7 @@ export async function focusVerificationQueue(DB,ranking,now,size=4){
   const fair=general.find(r=>!selected.has(r.address));
   return [...new Set([...(fair?[fair.address]:[]),...priority.map(r=>r.address),...general.map(r=>r.address)])].slice(0,size);
 }
-export async function collectFocus(env){
+export async function collectFocus(env,options={}){
   if(!env.DB)throw new Error('DB binding required');
   const DB=env.DB;
   await DB.batch(focusSchema.map(sql=>DB.prepare(sql)));
@@ -118,7 +118,10 @@ export async function collectFocus(env){
       const latest=await DB.prepare('SELECT at,hash FROM focus_events ORDER BY at DESC LIMIT 1').first();
       state.lastMigrationAt=latest?.at||null;state.lastMigrationHash=latest?.hash||null;state.lastMigrationLoaded=true;
     }
-    if(!state.startedAt){
+    if(options.historical&&!state.startedAt){
+      await save({...state,...await options.initialize(state)});
+    }
+    if(!options.historical&&!state.startedAt){
       // A new epoch starts at the latest operation, never at an old backlog cursor.
       // Carry known same-day usage so activation cannot reset the storage allowance.
       if(!state.legacyUsageImported){
@@ -128,10 +131,19 @@ export async function collectFocus(env){
       const latest=await focusPage(SOURCE,'','desc',1);
       await save({...state,startedAt:new Date().toISOString(),cursor:latest[0]?.paging_token||'0',counts:{first:0,second:0,pending:0},backlog:false});
     }
-    for(let page=0;page<3&&Date.now()-now<35000;page++){
-      const records=await focusPage(SOURCE,state.cursor);
-      const receipts=records.map(focusReceipt).filter(Boolean);
-      const births=records.filter(r=>r.type==='create_account'&&r.source_account===SOURCE&&r.transaction_successful!==false&&r.account);
+    if(options.historical&&state.startedAt&&state.sourceComplete){
+      const tip=(await focusPage(SOURCE,'','desc',1))[0];
+      if(!tip)throw new Error('Historical source tip unavailable');
+      if(BigInt(tip.paging_token)>BigInt(state.endCursor))await save({...state,endCursor:tip.paging_token,targetAt:tip.created_at,sourceComplete:false});
+      else await save({...state,checkedAt:new Date().toISOString()});
+    }
+    for(let page=0;state.startedAt&&!(options.historical&&state.sourceComplete)&&page<(options.historical?6:3)&&Date.now()-now<35000;page++){
+      const fetched=await focusPage(SOURCE,state.cursor);
+      const records=options.historical?fetched.filter(r=>BigInt(r.paging_token)<=BigInt(state.endCursor)):fetched;
+      const complete=options.historical&&(BigInt(records.at(-1)?.paging_token||state.cursor)>=BigInt(state.endCursor));
+      if(options.historical&&fetched.length<200&&!complete)throw new Error('Historical page ended before the known target; coverage cannot be confirmed');
+      const receipts=records.map(focusReceipt).filter(r=>r&&(!options.historical||r.at>=state.startedAt));
+      const births=records.filter(r=>r.type==='create_account'&&r.source_account===SOURCE&&r.transaction_successful!==false&&r.account&&(!options.historical||r.created_at>=state.startedAt));
       const addresses=[...new Set([...receipts.map(r=>r.address),...births.map(r=>r.account)])];
       const prior=await load(addresses),evidence=prior.wallets;
       const missing=addresses.filter(a=>!evidence.has(a));
@@ -152,6 +164,7 @@ export async function collectFocus(env){
         events.set(key,event);
       }
       const next={...state,cursor:records.at(-1)?.paging_token||state.cursor,backlog:records.length===200,checkedAt:new Date().toISOString()};
+      if(options.historical){next.sourceComplete=complete;next.backlog=!complete;next.scannedThrough=records.at(-1)?.created_at||state.scannedThrough;next.pagesScanned=(state.pagesScanned||0)+1;}
       for(const receipt of receipts)if(!next.lastMigrationAt||receipt.at>=next.lastMigrationAt){next.lastMigrationAt=receipt.at;next.lastMigrationHash=receipt.hash;}
       const changes=prepareChanges(addresses,prior.events,[...events.values()],evidence,next);
       await save(next,changes.changed,changes.wallets);
@@ -200,7 +213,7 @@ export async function collectFocus(env){
   }
   try{
     let ranking=lease.snapshot?JSON.parse(lease.snapshot).ranking:null;
-    if(state.startedAt&&(!ranking||Date.now()-Date.parse(ranking.updatedAt)>=300000)){
+    if(!options.historical&&state.startedAt&&(!ranking||Date.now()-Date.parse(ranking.updatedAt)>=300000)){
       try{
         const from=new Date(Date.now()-7*86400000).toISOString();
         const rows=(await DB.prepare('SELECT address,CAST(SUM(CAST(units AS INTEGER)) AS TEXT) AS units,MAX(round=1) AS first,MAX(round=2) AS second,MAX(round>2) AS later,MAX(round IS NULL) AS pending FROM focus_events WHERE at>=?1 GROUP BY address ORDER BY SUM(CAST(units AS INTEGER)) DESC,address LIMIT 20').bind(from).all()).results||[];
@@ -209,7 +222,7 @@ export async function collectFocus(env){
     }
     // The source balance is independent of receipts and never blocks their commit.
     let sourceAccount=lease.snapshot?JSON.parse(lease.snapshot).sourceAccount:null;
-    if(!sourceAccount||Date.now()-Date.parse(sourceAccount.attemptedAt||0)>=300000){
+    if(!options.historical&&(!sourceAccount||Date.now()-Date.parse(sourceAccount.attemptedAt||0)>=300000)){
       const attemptedAt=new Date().toISOString();
       try{
         const response=await fetch(API+'/accounts/'+SOURCE,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(10000)});
@@ -221,7 +234,8 @@ export async function collectFocus(env){
       }catch(e){sourceAccount={...(sourceAccount||{address:SOURCE,balance:null,checkedAt:null}),attemptedAt,error:e.message};}
     }
     const volumes=state.startedAt&&state.volumeUnits?{firstPi:decimal(state.volumeUnits.first),secondPi:decimal(state.volumeUnits.second)}:null;
-    const snapshot={version:40,volumes,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
+    const historical=options.historical?{since:options.since,targetAt:state.targetAt||null,scannedThrough:state.scannedThrough||null,pagesScanned:state.pagesScanned||0,sourceComplete:!!state.sourceComplete,initializing:!state.startedAt,scope:SOURCE}:null;
+    const snapshot={version:41,historical,volumes,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
     await DB.prepare('UPDATE focus_control SET snapshot=?1,state=?2,owner=NULL,lease_until=0 WHERE id=1 AND owner=?3').bind(JSON.stringify(snapshot),JSON.stringify(state),owner).run();
   }finally{
     await DB.prepare('UPDATE focus_control SET owner=NULL,lease_until=0 WHERE id=1 AND owner=?1').bind(owner).run();

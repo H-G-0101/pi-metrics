@@ -1,11 +1,15 @@
-Pi Migration Monitor — v40
+Pi Migration Monitor — v41
 
 Dois contadores cumulativos confirmados e Top 20 semanal.
 Novo período inicia na primeira ativação bem-sucedida da v36.
 Sem recuperação de 15 dias, relatórios extensos ou coleta de saldos de destinatários.
 Carteira de origem na tela, saldo da origem com cache de 5 minutos e idade da última migração observada.
-Atualizar da v36 para a v40 preserva o início da coleta e os contadores.
+Atualizar da v36 para a v41 preserva o início da coleta e os contadores.
 Sem dependência do GitHub Actions. Coleta no Cron do Worker.
 Dados e evidências antigos preservados no mesmo D1.
 
 Leia README.md antes de publicar o pacote completo.
+
+Nova seção Historical 2nd migrations desde 01/02/2025 UTC.
+Publicar também o Cron */5 * * * * para a recuperação histórica.
+Estatística separada: não somar com os contadores do monitor atual.
