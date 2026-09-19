@@ -10,6 +10,6 @@ Dados e evidências antigos preservados no mesmo D1.
 
 Leia README.md antes de publicar o pacote completo.
 
-Nova seção Historical 2nd migrations desde 01/02/2025 UTC.
+Nova seção Historical 2nd migrations desde 01/02/2026 UTC.
 Publicar também o Cron */5 * * * * para a recuperação histórica.
 Estatística separada: não somar com os contadores do monitor atual.

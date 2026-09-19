@@ -2,7 +2,7 @@
 
 ## Novidade da v41 — Historical 2nd migrations
 
-Nova seção azul na home, separada dos contadores desde a ativação. Mostra carteiras com segunda migração confirmada e Pi acumulado a partir de **01/02/2025 00:00 UTC**, com data alcançada pela varredura, data-alvo e pendências. A data define o recorte de busca; não afirma que segundas migrações começaram nessa data. O escopo é exclusivamente a carteira de migração exibida no site.
+Nova seção azul na home, separada dos contadores desde a ativação. Mostra carteiras com segunda migração confirmada e Pi acumulado a partir de **01/02/2026 00:00 UTC**, com data alcançada pela varredura, data-alvo e pendências. A data define o recorte de busca; não afirma que segundas migrações começaram nessa data. O escopo é exclusivamente a carteira de migração exibida no site.
 
 ### Publicação
 
