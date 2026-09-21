@@ -41,7 +41,7 @@ export async function initializeHistorical(state){
 }
 export function historicalDB(DB){
   // Dedicated tables, indexes, lock, cursors and totals in the existing database.
-  return {prepare:sql=>DB.prepare(sql.replace(/\bfocus_/g,'historical_')),batch:statements=>DB.batch(statements)};
+  return {prepare:sql=>DB.prepare(sql.replace(/\bfocus_/g,'historical2026_')),batch:statements=>DB.batch(statements)};
 }
 export async function collectHistorical(env){
   if(env.HISTORICAL_ENABLED==='false')return;

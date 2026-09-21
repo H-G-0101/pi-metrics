@@ -1,8 +1,20 @@
-# Pi Migration Monitor — v41
+# Pi Migration Monitor — v43
+
+## Correção da v43 — período histórico desde 01/02/2026 UTC
+
+A data correta substitui o recorte de fevereiro de 2025 usado nas versões anteriores. O coletor e a rota /historical agora usam tabelas historical2026_*, criadas automaticamente no mesmo D1. A recuperação corrigida começa no novo limite; tabelas historical_* antigas são preservadas, mas não alimentam o cartão nem continuam sendo processadas. Contadores principais, Pi acumulado e Top 20 em focus_* são preservados. Não apague o banco nem reinicie os contadores principais.
+
+Publique worker.js e os arquivos atualizados. Os dois agendamentos continuam iguais. A seção histórica volta temporariamente a Preparing/Partial enquanto recupera o período correto. Os dados antigos continuam ocupando armazenamento; nenhuma exclusão automática é feita. Mantidas as datas reais de início dentro dos dois cartões principais, introduzidas na v42.
+
+As notas abaixo descrevem a evolução das versões anteriores; o recorte vigente é fevereiro de 2026.
+
+## Novidade da v42
+
+Os dois cartões principais agora mostram a data real do início do acompanhamento, logo abaixo do título, em UTC. O horário completo aparece no tooltip. O período histórico permanece indicado separadamente desde 01/02/2025 UTC. Alteração de apresentação; nenhuma data, tabela, contador ou rotina de coleta foi reiniciada.
 
 ## Novidade da v41 — Historical 2nd migrations
 
-Nova seção azul na home, separada dos contadores desde a ativação. Mostra carteiras com segunda migração confirmada e Pi acumulado a partir de **01/02/2026 00:00 UTC**, com data alcançada pela varredura, data-alvo e pendências. A data define o recorte de busca; não afirma que segundas migrações começaram nessa data. O escopo é exclusivamente a carteira de migração exibida no site.
+Nova seção azul na home, separada dos contadores desde a ativação. Mostra carteiras com segunda migração confirmada e Pi acumulado a partir de **01/02/2025 00:00 UTC**, com data alcançada pela varredura, data-alvo e pendências. A data define o recorte de busca; não afirma que segundas migrações começaram nessa data. O escopo é exclusivamente a carteira de migração exibida no site.
 
 ### Publicação
 

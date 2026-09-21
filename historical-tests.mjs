@@ -8,6 +8,7 @@ const DB={prepare(query){return {query,args:[],bind(...args){this.args=args;retu
 for(const q of focusSchema)sql.exec(q);
 sql.prepare('UPDATE focus_control SET state=?,snapshot=?').run('{"live":"preserved"}','{"live":"preserved"}');
 const SOURCE='GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G';
+sql.exec("CREATE TABLE historical_control(id INTEGER PRIMARY KEY,state TEXT,snapshot TEXT); INSERT INTO historical_control VALUES(1,'{}','{\"counts\":{\"second\":999999}}')");
 const dates={1:'2024-01-01T00:00:00Z',2:'2026-01-31T23:59:59Z',3:'2026-02-01T00:00:00Z',4:'2026-02-01T00:00:05Z',5:'2026-02-02T00:00:00Z',6:'2026-09-17T00:00:00Z'};
 const op=(id,address,hash,amount='1',created_at=dates[4])=>({type:'create_claimable_balance',source_account:SOURCE,asset:'native',transaction_successful:true,transaction_hash:hash,paging_token:String(id),id:String(id),created_at,amount,claimants:[{destination:address}]});
 const birth=(id,address,hash,created_at)=>({...op(id,address,hash,'1',created_at),type:'create_account',account:address});
@@ -32,25 +33,25 @@ globalThis.fetch=async url=>{
  }
  throw new Error('Unexpected API call '+p);
 };
-const snapshot=()=>JSON.parse(sql.prepare('SELECT snapshot FROM historical_control').get().snapshot);
-const state=()=>JSON.parse(sql.prepare('SELECT state FROM historical_control').get().state);
+const snapshot=()=>JSON.parse(sql.prepare('SELECT snapshot FROM historical2026_control').get().snapshot);
+const state=()=>JSON.parse(sql.prepare('SELECT state FROM historical2026_control').get().state);
 await collectHistorical({DB});
-assert.equal(state().startedAt,HISTORICAL_SINCE);
+assert.equal(state().startedAt,'2026-02-01T00:00:00.000Z');assert.equal(JSON.parse(sql.prepare('SELECT snapshot FROM historical_control').get().snapshot).counts.second,999999,'old 2025 totals are preserved but isolated');
 assert.equal(state().cursor,'60','initial scan stops at saved target');
 assert.equal(state().sourceComplete,true);
 assert.deepEqual(snapshot().counts,{first:1,second:2,pending:0});
 assert.equal(snapshot().volumes.secondPi,'12.0000000');
-assert.equal(sql.prepare('SELECT COUNT(*) n FROM historical_events').get().n,3);
+assert.equal(sql.prepare('SELECT COUNT(*) n FROM historical2026_events').get().n,3);
 assert.equal(sql.prepare('SELECT COUNT(*) n FROM focus_events').get().n,0);
 assert.equal(sql.prepare('SELECT state FROM focus_control').get().state,'{"live":"preserved"}');
 assert.equal(calls.includes('/accounts/'+SOURCE),false,'no source balance reads in historical collector');
 await collectHistorical({DB});assert.equal(state().cursor,'70','historical collector extends to new source tip');
 assert.equal(snapshot().counts.second,2);assert.equal(snapshot().volumes.secondPi,'12.0000000','third event excluded');
-const again={...state(),cursor:'39',sourceComplete:false};sql.prepare('UPDATE historical_control SET state=?').run(JSON.stringify(again));
+const again={...state(),cursor:'39',sourceComplete:false};sql.prepare('UPDATE historical2026_control SET state=?').run(JSON.stringify(again));
 await collectHistorical({DB});assert.equal(snapshot().volumes.secondPi,'12.0000000','replay does not double count');
 const count=calls.length;await collectHistorical({DB,HISTORICAL_ENABLED:'false'});assert.equal(calls.length,count);
 // Missing ledger history must surface an error, never claim complete coverage.
-sql.exec('DELETE FROM historical_control;DELETE FROM historical_events;DELETE FROM historical_wallets');pruned=true;
+sql.exec('DELETE FROM historical2026_control;DELETE FROM historical2026_events;DELETE FROM historical2026_wallets');pruned=true;
 await collectHistorical({DB});assert.match(snapshot().error,/404/);assert.equal(snapshot().historical.sourceComplete,false);assert.equal(snapshot().counts,null);
 // Budget stop preserves the search/source cursor for a later UTC day or budget increase.
 pruned=false;await collectHistorical({DB,HISTORICAL_DAILY_WRITE_BUDGET:'1'});assert.match(snapshot().error,/budget/);assert.equal(state().startedAt,undefined);
