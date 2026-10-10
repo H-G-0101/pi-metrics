@@ -1,4 +1,16 @@
-# Pi Migration Monitor — v45
+# Pi Migration Monitor — v46
+
+## Novidade da v46 — recuperação histórica acelerada
+
+Um único Cron `* * * * *` executa primeiro o monitor atual e, em seguida, o histórico. O antigo `*/5 * * * *` é ignorado pela nova versão para evitar trabalho duplicado. O wrangler.toml já contém apenas o agendamento atual. Se publicar pelo editor da Cloudflare, mantenha o Cron a cada minuto e remova o antigo a cada cinco minutos. Não altere DB nem STATS e não apague tabelas.
+
+O histórico mantém o cursor já salvo desde fevereiro de 2026. Busca até 24 páginas da origem por execução (antes 6), com até 20 segundos dedicados à varredura, reservando o restante do ciclo de 45 segundos à classificação. Consulta até 80 históricos por rodada (antes 40), em grupos de até quatro (antes dois). Tempos, filas, orçamentos e disponibilidade da API podem reduzir esses máximos. Não há promessa de multiplicador de velocidade ou prazo de conclusão.
+
+Evidências do monitor atual são reutilizadas por destinatário quando têm origem do histórico comprovada, mesma política, sequência compatível e cursor que não retrocede. Ambiguidades e conflitos não são sobrescritos. Se a evidência já classifica o evento pendente, não há nova consulta à API para ele; se faltar informação, continua a partir do cursor reutilizado. Dados de eventos e contadores permanecem separados. A leitura das evidências existentes acrescenta consultas limitadas às carteiras do lote no D1.
+
+Orçamento histórico aumentado para 500 mil gravações estimadas/dia, com até 300 mil dessa parcela dedicadas à classificação. O orçamento atual continua em 1 milhão. São estimativas internas, não garantia de consumo faturado; maior velocidade pode elevar uso e custo. Quem publica só worker.js precisa atualizar as variáveis antigas no painel para receber os novos orçamentos. Páginas configuráveis: HISTORICAL_SOURCE_PAGES=24 e HISTORICAL_HISTORY_PAGES=80.
+
+Testes locais verificam reaproveitamento sem chamada à API, recusa de evidências incompatíveis, isolamento do monitor, avanço de 24 páginas, retomada exata, duplicação e orçamento. Publicação e velocidade real precisam ser conferidas após instalar a versão.
 
 ## Novidade da v45 — evidências e progresso
 

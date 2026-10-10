@@ -47,8 +47,15 @@ export async function collectHistorical(env){
   if(env.HISTORICAL_ENABLED==='false')return;
   if(!env.DB)throw new Error('DB binding required');
   return collectFocus({...env,DB:historicalDB(env.DB),
-    FOCUS_DAILY_WRITE_BUDGET:env.HISTORICAL_DAILY_WRITE_BUDGET||'250000',
-    FOCUS_HISTORY_WRITE_BUDGET:env.HISTORICAL_VERIFICATION_WRITE_BUDGET||'150000',
-    FOCUS_HISTORY_PAGES:'40',FOCUS_HISTORY_CONCURRENCY:'2'
-  },{historical:true,since:HISTORICAL_SINCE,initialize:initializeHistorical});
+    FOCUS_DAILY_WRITE_BUDGET:env.HISTORICAL_DAILY_WRITE_BUDGET||'500000',
+    FOCUS_HISTORY_WRITE_BUDGET:env.HISTORICAL_VERIFICATION_WRITE_BUDGET||'300000',
+    FOCUS_HISTORY_PAGES:env.HISTORICAL_HISTORY_PAGES||'80',FOCUS_HISTORY_CONCURRENCY:'4'
+  },{historical:true,since:HISTORICAL_SINCE,initialize:initializeHistorical,
+    loadEvidence:async addresses=>{
+      try{
+        const rows=(await env.DB.prepare('SELECT address,evidence FROM focus_wallets WHERE address IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(addresses)).all()).results||[];
+        return new Map(rows.map(r=>[r.address,JSON.parse(r.evidence)]));
+      }catch(e){if(String(e.message).includes('no such table'))return new Map();throw e;}
+    }
+  });
 }

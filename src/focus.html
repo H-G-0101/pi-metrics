@@ -11,7 +11,7 @@
 <section class="ranking" id="ranking"><div class="heading"><span class="eyebrow">Rolling 7-day window</span><h2>Top 20 migration recipients</h2><p class="muted">Ranked by total Pi migrated to each wallet · all lockups combined</p><p class="muted" id="rankingStatus">Waiting for observed receipts</p></div><div class="table-wrap"><table><thead><tr><th scope="col">Rank</th><th scope="col">Wallet</th><th scope="col">Classification</th><th scope="col" class="amount">Pi migrated</th></tr></thead><tbody id="rows"></tbody></table></div><div class="empty" id="empty">No receipts recorded in this tracking period yet.</div></section>
 <section class="source" aria-label="Migration source wallet"><span class="label">Migration source wallet</span><div class="source-address"><a id="sourceAddress" href="https://blockexplorer.minepi.com/mainnet/accounts/GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G" target="_blank" rel="noopener">GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G</a><button id="sourceCopy" class="copy" aria-label="Copy migration source wallet">Copy</button></div><div class="source-metrics"><div><span class="label">Source wallet balance</span><strong id="sourceBalance">—</strong><p class="muted" id="sourceBalanceAge">Updated every 5 minutes</p></div><div><span class="label">Last observed migration</span><strong id="lastMigrationAge">—</strong><p class="muted" id="lastMigrationNote">Latest migration observed during live tracking</p></div></div></section>
 <details class="methodology"><summary>How to read these numbers</summary><div class="method-grid"><div><strong>Wallets, not people</strong><p>Counts represent unique wallet addresses. A person may control more than one wallet. A wallet can appear in both migration counters.</p></div><div><strong>Migrated Pi, not current balance</strong><p>Totals combine recorded lockups for confirmed events in the stated period. Claims and spending do not reduce these totals.</p></div><div><strong>Received, then classified</strong><p>A receipt groups lockups for one wallet and transaction. Pending receipts may appear in the Top 20, but enter confirmed totals only after verification.</p></div></div><p>Migration numbers are established from available on-chain evidence. They do not reveal a user's identity, mining-app balance or eligibility. The overview accumulates since tracking started; only the Top 20 uses a rolling seven-day window.</p></details>
-<footer><span>Pi Metrics · Independent monitor · Not affiliated with Pi Network</span><span>Dates in UTC · K = thousand · M = million · v45</span></footer></main><script>
+<footer><span>Pi Metrics · Independent monitor · Not affiliated with Pi Network</span><span>Dates in UTC · K = thousand · M = million · v46</span></footer></main><script>
 const $=id=>document.getElementById(id);const full=n=>Number(n).toLocaleString('en-US',{maximumFractionDigits:7});const compact=n=>Number(n)>=1000?new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:2}).format(Number(n)):full(n);const date=s=>new Date(s).toLocaleString('en-US',{timeZone:'UTC'})+' UTC';let loading=false,lastSignature='';
 let sourceInfo=null,lastMigrationAt=null;
 let liveUpdated=null,rankingUpdated=null,historyUpdated=null,queueData=null,historyQueue=null,rankingInfo=null;
@@ -26,7 +26,7 @@ function sectionAges(){
  const age=(id,at,prefix)=>{$(id).textContent=prefix+(at?relativeAge(at):'waiting for an update');$(id).title=at?date(at):'';};
  age('overviewAge',liveUpdated,'Counters updated: ');age('queueAge',queueData?.updatedAt,'Queue measured: ');
  if(rankingInfo){$('rankingStatus').textContent=(rankingInfo.complete?'Full seven-day coverage':'Partial seven-day coverage · since tracking started')+(rankingUpdated?' · updated '+relativeAge(rankingUpdated):'')+(rankingInfo.error?' · update delayed':'');$('rankingStatus').title=rankingUpdated?date(rankingUpdated):'';}
- if(historyQueue){const v=queueView(historyQueue,Date.now()-Date.parse(historyQueue.updatedAt)>900000);$('historyPace').textContent=v.pace+' · '+v.eta;}
+ if(historyQueue){const v=queueView(historyQueue,Date.now()-Date.parse(historyQueue.updatedAt)>300000);$('historyPace').textContent=v.pace+' · '+v.eta;}
  if(historyUpdated)$('historyUpdated').textContent='Last collection: '+relativeAge(historyUpdated)+' · '+date(historyUpdated);
  if(queueData){const stale=Date.now()-Date.parse(queueData.updatedAt)>180000;const v=queueView(queueData,stale);$('queueEta').textContent=v.eta;}
 }
@@ -59,7 +59,7 @@ function ranking(data){
  }
 }
 async function refresh(){if(loading||document.hidden)return;loading=true;try{
- const response=await fetch('/live',{cache:'no-store',signal:AbortSignal.timeout(10000)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Collector unavailable');if(![36,37,38,39,40,41,42,43,44,45].includes(data.version))throw new Error('Publish the current Worker to activate the simplified monitor');
+ const response=await fetch('/live',{cache:'no-store',signal:AbortSignal.timeout(10000)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Collector unavailable');if(![36,37,38,39,40,41,42,43,44,45,46].includes(data.version))throw new Error('Publish the current Worker to activate the simplified monitor');
  liveUpdated=data.updatedAt||data.checkedAt||null;queueData=data.queue||null;
  if(queueData){$('queueResolved').textContent=compact(queueData.resolved);$('queueAdded').textContent=compact(queueData.added);$('queueTrend').textContent=queueData.ready?queueData.trend.charAt(0).toUpperCase()+queueData.trend.slice(1):'Measuring';}
  sectionAges();sourceInfo=data.sourceAccount||null;lastMigrationAt=data.lastMigrationAt||null;sourceAges();
@@ -85,11 +85,11 @@ async function refreshHistorical(){
   const begin=Date.parse(h.since),end=Date.parse(h.targetAt),through=Date.parse(h.scannedThrough);
   const coverage=Number.isFinite(begin)&&Number.isFinite(end)&&end>begin?(h.sourceComplete?100:Number.isFinite(through)?Math.min(100,Math.max(0,100*(through-begin)/(end-begin))):0):0;
   $('historyBar').value=coverage;$('historyBarLabel').textContent='Date coverage: '+coverage.toFixed(1)+'% of the target interval';
-  const pace=queueView(historyQueue,!!(historyUpdated&&Date.now()-Date.parse(historyUpdated)>900000));
+  const pace=queueView(historyQueue,!!(historyUpdated&&Date.now()-Date.parse(historyUpdated)>300000));
   $('historyPace').textContent=pace.pace+' · '+pace.eta;
   if(data.counts)number('historyWallets',data.counts.second);
   if(data.volumes){$('historyPi').textContent=compact(data.volumes.secondPi)+' Pi';$('historyPi').title=data.volumes.secondPi+' Pi';}
-  const stale=data.checkedAt&&Date.now()-Date.parse(data.checkedAt)>15*60000;
+  const stale=data.checkedAt&&Date.now()-Date.parse(data.checkedAt)>5*60000;
   const complete=h.sourceComplete&&pending===0&&!data.error&&!data.historyError&&!stale;
   $('historyHealth').textContent=data.error||stale?'Delayed':h.initializing?'Preparing':complete?'Verified to target':'Partial';
   $('historyHealth').className='chip'+(complete?'':' warn');

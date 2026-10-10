@@ -53,6 +53,17 @@ export function migrationProof(proof){
   if(!events.length&&proof.birthHash)events.push({hash:proof.birthHash,round:1,at:null});
   return events.filter(e=>/^[a-f0-9]{64}$/i.test(e.hash));
 }
+// Reuse only a compatible, verified prefix; never merge unrelated histories.
+export function sharedEvidence(current,candidate){
+  if(!candidate||candidate.policyVersion!==29||!candidate.genesis||candidate.ambiguous||!/^\d+$/.test(candidate.cursor||''))return current;
+  if(current?.ambiguous)return current;
+  if(current?.cursor&&(!/^\d+$/.test(current.cursor)||BigInt(candidate.cursor)<BigInt(current.cursor)))return current;
+  const events=candidate.events||[],old=current?.events||[];
+  if(old.some((e,i)=>events[i]?.hash!==e.hash))return current;
+  const birth=current?.birthHash||candidate.birthHash;
+  if(birth&&events.length&&events[0].hash!==birth)return current;
+  return {...candidate,events:events.map(e=>({...e})),...(birth?{birthHash:birth}:{})};
+}
 export async function focusVerificationQueue(DB,ranking,now,size=4){
   size=Math.max(4,Math.min(80,Math.floor(size)||4));
   const prioritySize=Math.min(20,size-1);
@@ -80,6 +91,7 @@ export async function collectFocus(env,options={}){
   state.writes=Number(state.writes||0)+8;
   const setting=(key,fallback,min,max)=>{const n=Number(env[key]);return Number.isFinite(n)&&n>=min?Math.min(max,Math.floor(n)):fallback;};
   const limit=setting('FOCUS_DAILY_WRITE_BUDGET',1000000,1,5000000),historyLimit=setting('FOCUS_HISTORY_WRITE_BUDGET',400000,1,5000000);
+  const sourcePages=options.historical?setting('HISTORICAL_SOURCE_PAGES',24,1,40):3;
   const historyPages=setting('FOCUS_HISTORY_PAGES',80,4,80),concurrency=setting('FOCUS_HISTORY_CONCURRENCY',4,1,4);
   async function save(next,events=[],wallets=[]){
     const cost=events.length*3+wallets.length*3+1;
@@ -160,7 +172,7 @@ export async function collectFocus(env,options={}){
       if(BigInt(tip.paging_token)>BigInt(state.endCursor))await save({...state,endCursor:tip.paging_token,targetAt:tip.created_at,sourceComplete:false});
       else await save({...state,checkedAt:new Date().toISOString()});
     }
-    for(let page=0;state.startedAt&&!(options.historical&&state.sourceComplete)&&page<(options.historical?6:3)&&Date.now()-now<35000;page++){
+    for(let page=0;state.startedAt&&!(options.historical&&state.sourceComplete)&&page<sourcePages&&Date.now()-now<(options.historical?20000:35000);page++){
       const fetched=await focusPage(SOURCE,state.cursor);
       const records=options.historical?fetched.filter(r=>BigInt(r.paging_token)<=BigInt(state.endCursor)):fetched;
       const complete=options.historical&&(BigInt(records.at(-1)?.paging_token||state.cursor)>=BigInt(state.endCursor));
@@ -176,6 +188,10 @@ export async function collectFocus(env,options={}){
         try{saved=(await DB.prepare("SELECT name,cursor FROM sync_state WHERE name IN (SELECT 'evidence:'||value FROM json_each(?1))").bind(JSON.stringify(missing)).all()).results||[];}catch(e){if(!String(e.message).includes('no such table'))throw e;}
         for(const row of saved){const proof=JSON.parse(row.cursor);if(proof.policyVersion===29)evidence.set(row.name.slice(9),proof);}
         for(const a of missing)if(!evidence.has(a))evidence.set(a,{policyVersion:29,cursor:'',events:[],genesis:false,ambiguous:false});
+      }
+      if(options.loadEvidence&&addresses.length){
+        const shared=await options.loadEvidence(addresses);
+        for(const address of addresses)evidence.set(address,sharedEvidence(evidence.get(address),shared.get(address)));
       }
       for(const birth of births)evidence.get(birth.account).birthHash=birth.transaction_hash;
       const events=new Map(prior.events.map(e=>[e.address+':'+e.hash,{...e}]));
@@ -202,12 +218,17 @@ export async function collectFocus(env,options={}){
       for(let offset=0;offset<addresses.length&&!stop&&Date.now()-now<45000;offset+=concurrency){
         const batch=addresses.slice(offset,offset+concurrency);
         const prior=await load(batch),evidence=prior.wallets;
+        if(options.loadEvidence){
+          const shared=await options.loadEvidence(batch);
+          for(const address of batch)evidence.set(address,sharedEvidence(evidence.get(address),shared.get(address)));
+        }
         // Reserve enough for all potentially reclassified events before requesting a page.
         const maximumCost=prior.events.length*3+batch.length*3+1;
         if(state.historyWrites+maximumCost>historyLimit||state.writes+maximumCost>limit)break;
         let pauseUntil=0;
         const outcomes=await Promise.allSettled(batch.map(async address=>{
           const proof=evidence.get(address);
+          if(prior.events.filter(e=>e.address===address&&e.round==null).every(e=>focusRound(proof,e.hash)!=null))return;
           try{
             const records=await focusPage(address,proof.cursor||'');
             if(!proof.cursor&&records.length)proof.genesis=records[0].type==='create_account'&&records[0].account===address;
@@ -260,7 +281,7 @@ export async function collectFocus(env,options={}){
     const volumes=state.startedAt&&state.volumeUnits?{firstPi:decimal(state.volumeUnits.first),secondPi:decimal(state.volumeUnits.second)}:null;
     const historical=options.historical?{since:options.since,targetAt:state.targetAt||null,scannedThrough:state.scannedThrough||null,pagesScanned:state.pagesScanned||0,sourceComplete:!!state.sourceComplete,initializing:!state.startedAt,scope:SOURCE}:null;
     const queue=queueMetrics(state.telemetry,state.counts?.pending||0,!!error||!!historyError||!!state.backlog||state.writes>=limit||state.historyWrites>=historyLimit||Number(state.historyPauseUntil||0)>Date.now());
-    const snapshot={version:45,updatedAt:new Date().toISOString(),queue,historical,volumes,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
+    const snapshot={version:46,updatedAt:new Date().toISOString(),queue,historical,volumes,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
     await DB.prepare('UPDATE focus_control SET snapshot=?1,state=?2,owner=NULL,lease_until=0 WHERE id=1 AND owner=?3').bind(JSON.stringify(snapshot),JSON.stringify(state),owner).run();
   }finally{
     await DB.prepare('UPDATE focus_control SET owner=NULL,lease_until=0 WHERE id=1 AND owner=?1').bind(owner).run();
