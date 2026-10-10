@@ -1,4 +1,8 @@
-# Pi Migration Monitor — v43
+# Pi Migration Monitor — v44
+
+## Novidade da v44 — clareza e apresentação
+
+Home reorganizada com Overview, History e Top 20; cartões indicam período, carteiras únicas e total de Pi migrado incluindo bloqueios. Histórico possui aviso visível de sobreposição. Recebimentos pendentes são rotulados como recebidos aguardando classificação; progresso de coleta e classificação são descritos separadamente. Datas padronizadas em UTC, cores sóbrias e layout responsivo. Mantidos banco, dados, coleta e agendamentos.
 
 ## Correção da v43 — período histórico desde 01/02/2026 UTC
 
