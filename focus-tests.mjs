@@ -35,7 +35,7 @@ assert.equal(snapshot().sourceAccount.balance,'1234567.1234567','failed balance 
 sql.exec('DELETE FROM focus_control; DELETE FROM focus_events; DELETE FROM focus_wallets; CREATE TABLE live_control(id INTEGER PRIMARY KEY,state TEXT)');
 sql.prepare('INSERT INTO live_control VALUES(1,?)').run(JSON.stringify({day:new Date().toISOString().slice(0,10),writes:90000}));
 await collectFocus({DB,FOCUS_DAILY_WRITE_BUDGET:85000});const consumed=state().writes;assert.equal(state().startedAt,undefined);assert.match(snapshot().error,/budget/);
-await collectFocus({DB,FOCUS_DAILY_WRITE_BUDGET:85000});assert.equal(state().writes,consumed+8,'legacy quota is carried only once, even after failed activation');
+await collectFocus({DB,FOCUS_DAILY_WRITE_BUDGET:85000});assert.ok(state().writes>consumed&&state().writes-consumed<100,'only bounded run overhead is added; legacy quota is not imported again');assert.equal(snapshot().diagnostics.storage.legacyCarry,90000);
 // Queue priority, fairness, retry gates and unused-slot reuse on real SQLite.
 sql.exec('DELETE FROM focus_wallets');
 const insert=sql.prepare('INSERT INTO focus_wallets VALUES(?,?,?,?)');

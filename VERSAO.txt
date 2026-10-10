@@ -1,4 +1,4 @@
-Pi Migration Monitor — v46
+Pi Migration Monitor — v47
 
 Dois contadores cumulativos confirmados e Top 20 semanal.
 Novo período inicia na primeira ativação bem-sucedida da v36.
@@ -15,3 +15,5 @@ Um único Cron * * * * * executa o monitor e depois o histórico. Remova o Cron 
 Estatística separada: não somar com os contadores do monitor atual.
 
 v46: ritmo e previsão da fila, evidências no Top 20, atualização por seção e barra de cobertura histórica. Estimativa exige uma hora de observação.
+
+v47: medição D1 com reservas explícitas, ritmo adaptativo compartilhado, evidências nos dois sentidos, auditoria incremental e motivos de pendências. Mesmos dados, bindings e Cron.

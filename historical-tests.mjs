@@ -63,6 +63,7 @@ sql.exec('DELETE FROM historical2026_control;DELETE FROM historical2026_events;D
 await collectHistorical({DB});assert.match(snapshot().error,/404/);assert.equal(snapshot().historical.sourceComplete,false);assert.equal(snapshot().counts,null);
 // Budget stop preserves the search/source cursor for a later UTC day or budget increase.
 pruned=false;await collectHistorical({DB,HISTORICAL_DAILY_WRITE_BUDGET:'1'});assert.match(snapshot().error,/budget/);assert.equal(state().startedAt,undefined);
+sql.exec("UPDATE collector_api_control SET state='{}',revision=revision+1");
 // Fast profile resumes the exact saved cursor and scans up to 24 source pages.
 sql.exec('DELETE FROM historical2026_control;DELETE FROM historical2026_events;DELETE FROM historical2026_wallets');
 chain=Array.from({length:5000},(_,i)=>({...op(i+1,'X','batch','1',dates[6]),type:'payment'}));

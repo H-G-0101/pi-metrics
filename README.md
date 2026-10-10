@@ -1,4 +1,28 @@
-# Pi Migration Monitor — v46
+# Pi Migration Monitor — v47
+
+## Novidade da v47 — controle, evidências e auditoria
+
+Publique o pacote completo. Banco, dados, cursores, contadores e Cron único a cada minuto são preservados. Uma pequena tabela `collector_api_control` é criada automaticamente no mesmo D1 para compartilhar o ritmo e a pausa da API entre os coletores. Não precisa executar SQL manual ou reiniciar a recuperação.
+
+### Consumo medido
+
+Consultas instrumentadas leem `meta.rows_written` retornado pelo D1, inclusive operações com RETURNING. O orçamento é atualizado com esses valores após os lotes concluídos. Antes de enviar um lote ainda é necessária uma reserva conservadora. Gravações sem metadados, a última persistência do snapshot e liberação de trava aparecem como estimativas, separadas do consumo informado pelo banco. Uso anterior da v46 é carregado, sem zerar o orçamento. Uma interrupção após o commit pode deixar a reserva do lote no lugar da medição até nova execução; não é prometida reconciliação exata da fatura. O painel cobre estes coletores, não toda a conta Cloudflare, e não é um teto garantido de faturamento. Limites continuam iguais aos da v46.
+
+Referência do formato D1: https://developers.cloudflare.com/d1/worker-api/return-object/
+
+### Ritmo e evidências
+
+O coletor reduz a concorrência pela metade diante de falhas, até uma consulta simultânea. A pausa compartilhada é de ao menos cinco minutos, respeitando Retry-After nas páginas de operações até uma hora. Após 30 páginas bem-sucedidas aumenta gradualmente um nível, até quatro. A quantidade de páginas por rodada acompanha esse nível. Cursors são preservados; erro não confirma migração. A leitura do saldo de origem mantém seu cache e falhas dessa leitura não interrompem a coleta das migrações.
+
+Histórico e monitor atual consultam evidências um do outro. Só reutilizam prefixos confirmados, compatíveis e sem recuar cursor; não somam contadores entre períodos e não misturam evidências conflitantes. Consulta à API é dispensada quando o histórico salvo já confirma o evento pendente.
+
+### Auditoria e pendências
+
+A auditoria percorre no máximo 250 endereços com eventos por execução, enquanto houver tempo. Compara contagens de carteiras únicas, pendências e volumes exatos em unidades inteiras, além da consistência dos registros de fila associados. Ajusta o trecho já percorrido quando o próprio coletor modifica seus eventos. Ao concluir, aguarda 24 horas para iniciar novo ciclo. Detecta discrepâncias e mostra aviso; não repara nem altera totais automaticamente. Não prova cobertura da blockchain nem validade de todas as classificações e não substitui backup. Alterações externas durante a varredura podem produzir divergência que deve ser investigada.
+
+Seções expansíveis mostram consumo, velocidade, resultado da auditoria e uma amostra de até 20 carteiras pendentes em ordem de tentativa. A amostra é atualizada aproximadamente a cada cinco minutos; não é uma distribuição da fila inteira. Motivos: aguardando primeira consulta, histórico em andamento, erro de API, criação da conta ausente e histórico ambíguo. Carteiras antigas podem não ter data inicial de pendência registrada; a versão não inventa essa data. Motivos também aparecem nos itens pendentes do Top 20 após a atualização do ranking.
+
+Testes: `node focus-tests.mjs`, `node historical-tests.mjs`, `node transparency-tests.mjs`, `node reliability-tests.mjs`. Incluem metadados de gravação, fallback, rollback, pausa compartilhada, retomada gradual, auditoria com alterações durante a coleta, divergências e reaproveitamento inverso de evidências. Casos de bloqueio único, múltiplos bloqueios e transações com destinatários diferentes usam fixtures; não constituem auditoria ao vivo de transações reais. Não houve publicação nem inspeção visual em navegador real neste ambiente.
 
 ## Novidade da v46 — recuperação histórica acelerada
 

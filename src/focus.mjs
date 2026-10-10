@@ -1,3 +1,4 @@
+import {meteredDatabase,adaptiveController,pendingReason,adjustAudit,auditTotals,auditStep,publicAudit} from './reliability.mjs';
 // v36: new receipts only, persistent ordinal evidence, no rolling analytics.
 const SOURCE='GABT7EMPGNCQSZM22DIYC4FNKHUVJTXITUF6Y5HNIWPU4GA7BHT4GC5G';
 const RECOVERY='GC5RNDCRO6DDM7NZDEMW3RIN5K6AHN6GMWSZ5SAH2TRJLVGQMB2I3BNJ';
@@ -28,7 +29,7 @@ export function focusRound(evidence,hash){
 }
 async function focusPage(address,cursor,order='asc',limit=200){
   const response=await fetch(API+'/accounts/'+address+'/operations?order='+order+'&limit='+limit+(cursor?'&cursor='+encodeURIComponent(cursor):''),{headers:{Accept:'application/json'},signal:AbortSignal.timeout(10000)});
-  if(!response.ok){const error=new Error('Pi API HTTP '+response.status);error.status=response.status;throw error;}
+  if(!response.ok){const error=new Error('Pi API HTTP '+response.status);error.status=response.status;const retry=response.headers?.get?.('retry-after');error.retryAfterMs=retry?(Number.isFinite(Number(retry))?Number(retry)*1000:Math.max(0,Date.parse(retry)-Date.now())):0;throw error;}
   const rows=(await response.json())._embedded?.records;
   if(!Array.isArray(rows)||rows.some(r=>!/^\d+$/.test(String(r.paging_token))||!Number.isFinite(Date.parse(r.created_at))||!r.transaction_hash))throw new Error('Invalid operations page; cursor preserved');
   for(let i=1;i<rows.length;i++)if(order==='asc'?BigInt(rows[i].paging_token)<=BigInt(rows[i-1].paging_token):BigInt(rows[i].paging_token)>=BigInt(rows[i-1].paging_token))throw new Error('Unordered operations page');
@@ -79,7 +80,10 @@ export async function focusVerificationQueue(DB,ranking,now,size=4){
 }
 export async function collectFocus(env,options={}){
   if(!env.DB)throw new Error('DB binding required');
-  const DB=env.DB;
+  const DB=meteredDatabase(env.DB);
+  if(!options.historical&&!options.loadEvidence)options={...options,loadEvidence:async addresses=>{
+    try{const rows=(await DB.prepare('SELECT address,evidence FROM historical2026_wallets WHERE address IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(addresses)).all()).results||[];return new Map(rows.map(w=>[w.address,JSON.parse(w.evidence)]));}catch(e){if(String(e.message).includes('no such table'))return new Map();throw e;}
+  }};
   await DB.batch(focusSchema.map(sql=>DB.prepare(sql)));
   const now=Date.now(),owner=crypto.randomUUID();
   const lease=await DB.prepare('UPDATE focus_control SET owner=?1,lease_until=?2 WHERE id=1 AND lease_until<?3 RETURNING state,snapshot').bind(owner,now+180000,now).first();
@@ -88,13 +92,20 @@ export async function collectFocus(env,options={}){
   state.telemetry||={since:now,buckets:[]};
   const day=new Date().toISOString().slice(0,10);
   if(state.day!==day){state.day=day;state.writes=0;state.historyWrites=0;}
-  state.writes=Number(state.writes||0)+8;
+  let baseUsage=Number(state.writes||0);
+  const priorStorage=state.storage?.day===day?state.storage:{reportedWrites:0,estimatedWrites:0};
+  const api=await adaptiveController(DB);
+  function accounting(next,overhead=0){next.writes=baseUsage+DB.usage.reportedWrites+DB.usage.estimatedWrites+overhead;next.storage={day,reportedWrites:priorStorage.reportedWrites+DB.usage.reportedWrites,estimatedWrites:priorStorage.estimatedWrites+DB.usage.estimatedWrites+overhead,legacyCarry:Math.max(0,baseUsage-priorStorage.reportedWrites-priorStorage.estimatedWrites)};}
+  accounting(state);
+  async function pageRequest(...args){try{const page=await focusPage(...args);api.good();return page;}catch(e){api.bad(e);throw e;}}
   const setting=(key,fallback,min,max)=>{const n=Number(env[key]);return Number.isFinite(n)&&n>=min?Math.min(max,Math.floor(n)):fallback;};
   const limit=setting('FOCUS_DAILY_WRITE_BUDGET',1000000,1,5000000),historyLimit=setting('FOCUS_HISTORY_WRITE_BUDGET',400000,1,5000000);
   const sourcePages=options.historical?setting('HISTORICAL_SOURCE_PAGES',24,1,40):3;
-  const historyPages=setting('FOCUS_HISTORY_PAGES',80,4,80),concurrency=setting('FOCUS_HISTORY_CONCURRENCY',4,1,4);
+  const concurrency=Math.min(api.level,setting('FOCUS_HISTORY_CONCURRENCY',4,1,4));
+  const historyPages=Math.max(4,Math.floor(setting('FOCUS_HISTORY_PAGES',80,4,80)*concurrency/4));
   async function save(next,events=[],wallets=[]){
-    const cost=events.length*3+wallets.length*3+1;
+    accounting(state);
+    const cost=events.length*6+wallets.length*6+1;
     if(limit>0&&state.writes+cost>limit)throw new Error('Daily storage budget reached; resumes next UTC day');
     next.writes=state.writes+cost;
     const statements=[
@@ -104,7 +115,7 @@ export async function collectFocus(env,options={}){
     ];
     const result=await DB.batch(statements);
     if(!result.at(-1).meta?.changes)throw new Error('Collector lease lost');
-    state=next;
+    accounting(next);state=next;
   }
   async function load(addresses){
     const args=JSON.stringify(addresses);
@@ -118,6 +129,7 @@ export async function collectFocus(env,options={}){
     const changed=[],wallets=[];
     next.counts={...state.counts};
     next.volumeUnits={...state.volumeUnits};
+    next.audit=state.audit;
     const minute=Math.floor(Date.now()/60000)*60000;
     next.telemetry={since:state.telemetry.since,buckets:state.telemetry.buckets.filter(b=>b.at>minute-3600000).map(b=>({...b}))};
     let bucket=next.telemetry.buckets.find(b=>b.at===minute);
@@ -132,6 +144,8 @@ export async function collectFocus(env,options={}){
         if(!old||old.units!==event.units||old.ids!==event.ids||old.round!==event.round)changed.push(event);
       }
       const a=counts(before),b=counts(after);
+      next.audit=adjustAudit(next.audit,address,auditTotals(before),auditTotals(after));
+      if(b.pending){proof.pendingSince||=new Date().toISOString();proof.pendingReason=pendingReason(proof);}else{delete proof.pendingSince;delete proof.pendingReason;}
       for(const k of ['first','second','pending'])next.counts[k]+=b[k]-a[k];
       for(const [key,round] of [['first',1],['second',2]]){
         const sum=rows=>rows.filter(e=>e.round===round).reduce((total,e)=>total+BigInt(e.units),0n);
@@ -153,6 +167,8 @@ export async function collectFocus(env,options={}){
       const latest=await DB.prepare('SELECT at,hash FROM focus_events ORDER BY at DESC LIMIT 1').first();
       state.lastMigrationAt=latest?.at||null;state.lastMigrationHash=latest?.hash||null;state.lastMigrationLoaded=true;
     }
+    if(state.writes>=limit)throw new Error('Daily storage budget reached; resumes next UTC day');
+    if(api.paused)throw new Error('API cooldown active; progress preserved');
     if(options.historical&&!state.startedAt){
       await save({...state,...await options.initialize(state)});
     }
@@ -160,20 +176,20 @@ export async function collectFocus(env,options={}){
       // A new epoch starts at the latest operation, never at an old backlog cursor.
       // Carry known same-day usage so activation cannot reset the storage allowance.
       if(!state.legacyUsageImported){
-        try{const old=await DB.prepare('SELECT state FROM live_control WHERE id=1').first();const usage=old?JSON.parse(old.state):null;if(usage?.day===day)state.writes+=Number(usage.writes||0);}catch(e){if(!String(e.message).includes('no such table'))throw e;}
+        try{const old=await DB.prepare('SELECT state FROM live_control WHERE id=1').first();const usage=old?JSON.parse(old.state):null;if(usage?.day===day)baseUsage+=Number(usage.writes||0);accounting(state);}catch(e){if(!String(e.message).includes('no such table'))throw e;}
         state.legacyUsageImported=true;
       }
-      const latest=await focusPage(SOURCE,'','desc',1);
+      const latest=await pageRequest(SOURCE,'','desc',1);
       await save({...state,startedAt:new Date().toISOString(),cursor:latest[0]?.paging_token||'0',counts:{first:0,second:0,pending:0},backlog:false});
     }
     if(options.historical&&state.startedAt&&state.sourceComplete){
-      const tip=(await focusPage(SOURCE,'','desc',1))[0];
+      const tip=(await pageRequest(SOURCE,'','desc',1))[0];
       if(!tip)throw new Error('Historical source tip unavailable');
       if(BigInt(tip.paging_token)>BigInt(state.endCursor))await save({...state,endCursor:tip.paging_token,targetAt:tip.created_at,sourceComplete:false});
       else await save({...state,checkedAt:new Date().toISOString()});
     }
-    for(let page=0;state.startedAt&&!(options.historical&&state.sourceComplete)&&page<sourcePages&&Date.now()-now<(options.historical?20000:35000);page++){
-      const fetched=await focusPage(SOURCE,state.cursor);
+    for(let page=0;state.startedAt&&!(options.historical&&state.sourceComplete)&&page<Math.max(1,Math.floor(sourcePages*api.level/4))&&Date.now()-now<(options.historical?20000:35000);page++){
+      const fetched=await pageRequest(SOURCE,state.cursor);
       const records=options.historical?fetched.filter(r=>BigInt(r.paging_token)<=BigInt(state.endCursor)):fetched;
       const complete=options.historical&&(BigInt(records.at(-1)?.paging_token||state.cursor)>=BigInt(state.endCursor));
       if(options.historical&&fetched.length<200&&!complete)throw new Error('Historical page ended before the known target; coverage cannot be confirmed');
@@ -209,9 +225,9 @@ export async function collectFocus(env,options={}){
       await save(next,changes.changed,changes.wallets);
       if(records.length<200)break;
     }
-  }catch(e){error=e.message;}
+  }catch(e){error=e.message;if(e.status||e.name==='TimeoutError')api.bad(e);}
   // Paid profile: bounded parallel requests, incremental batch commits and API backoff.
-  if(state.startedAt&&!error&&state.historyWrites<historyLimit&&Date.now()-now<45000&&Number(state.historyPauseUntil||0)<=Date.now()){
+  if(state.startedAt&&!error&&!api.paused&&state.historyWrites<historyLimit&&Date.now()-now<45000&&Number(state.historyPauseUntil||0)<=Date.now()){
     try{
       const addresses=await focusVerificationQueue(DB,lease.snapshot?JSON.parse(lease.snapshot).ranking:null,new Date().toISOString(),historyPages);
       let stop=false;
@@ -223,14 +239,14 @@ export async function collectFocus(env,options={}){
           for(const address of batch)evidence.set(address,sharedEvidence(evidence.get(address),shared.get(address)));
         }
         // Reserve enough for all potentially reclassified events before requesting a page.
-        const maximumCost=prior.events.length*3+batch.length*3+1;
+        const maximumCost=prior.events.length*6+batch.length*6+1;accounting(state);
         if(state.historyWrites+maximumCost>historyLimit||state.writes+maximumCost>limit)break;
         let pauseUntil=0;
         const outcomes=await Promise.allSettled(batch.map(async address=>{
           const proof=evidence.get(address);
           if(prior.events.filter(e=>e.address===address&&e.round==null).every(e=>focusRound(proof,e.hash)!=null))return;
           try{
-            const records=await focusPage(address,proof.cursor||'');
+            const records=await pageRequest(address,proof.cursor||'');
             if(!proof.cursor&&records.length)proof.genesis=records[0].type==='create_account'&&records[0].account===address;
             proof.events||=[];
             for(const op of records){
@@ -242,16 +258,17 @@ export async function collectFocus(env,options={}){
             if(!proof.genesis)proof.error='Account creation was not present at the start of available history';else delete proof.error;
           }catch(e){
             historyError=e.message;proof.error=e.message;
-            if(e.status===429||e.status>=500){stop=true;pauseUntil=Date.now()+300000;}
+            stop=true;pauseUntil=Date.parse(api.snapshot().pauseUntil)||Date.now()+300000;
           }
         }));
         for(const outcome of outcomes)if(outcome.status==='rejected')throw outcome.reason;
         const next={...state,historyPauseUntil:pauseUntil};
         const changes=prepareChanges(batch,prior.events,prior.events.map(e=>({...e})),evidence,next,new Date(Date.now()+60000).toISOString());
-        for(const wallet of changes.wallets)if(evidence.get(wallet.address).error)wallet.retry_at=new Date(Date.now()+300000).toISOString();
-        const cost=changes.changed.length*3+changes.wallets.length*3+1;
-        next.historyWrites=state.historyWrites+cost;
+        for(const wallet of changes.wallets)if(evidence.get(wallet.address).error)wallet.retry_at=new Date(Date.now()+(evidence.get(wallet.address).complete&&!evidence.get(wallet.address).genesis?86400000:300000)).toISOString();
+        const beforeWrites=DB.usage.reportedWrites+DB.usage.estimatedWrites,previousHistory=state.historyWrites||0;
+        next.historyWrites=previousHistory+maximumCost;
         await save(next,changes.changed,changes.wallets);
+        state.historyWrites=previousHistory+DB.usage.reportedWrites+DB.usage.estimatedWrites-beforeWrites;
       }
     }catch(e){historyError=e.message;}
   }
@@ -261,13 +278,15 @@ export async function collectFocus(env,options={}){
       try{
         const from=new Date(Date.now()-7*86400000).toISOString();
         const rows=(await DB.prepare('SELECT address,CAST(SUM(CAST(units AS INTEGER)) AS TEXT) AS units,MAX(round=1) AS first,MAX(round=2) AS second,MAX(round>2) AS later,MAX(round IS NULL) AS pending FROM focus_events WHERE at>=?1 GROUP BY address ORDER BY SUM(CAST(units AS INTEGER)) DESC,address LIMIT 20').bind(from).all()).results||[];
-        const proofs=new Map(((await DB.prepare('SELECT address,evidence FROM focus_wallets WHERE address IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(rows.map(r=>r.address))).all()).results||[]).map(w=>[w.address,migrationProof(JSON.parse(w.evidence))]));
-        ranking={updatedAt:new Date().toISOString(),complete:state.startedAt<=from&&!state.backlog&&!error,rows:rows.map((r,i)=>({rank:i+1,address:r.address,evidence:proofs.get(r.address)||[],amountPi:decimal(r.units),type:[r.first?'1st':null,r.second?'2nd':null,r.later?'Later':null,r.pending?'Pending':null].filter(Boolean).join(' / ')}))};
+        const proofRows=(await DB.prepare('SELECT address,evidence FROM focus_wallets WHERE address IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(rows.map(r=>r.address))).all()).results||[];
+        const proofs=new Map(proofRows.map(w=>[w.address,migrationProof(JSON.parse(w.evidence))]));
+        const reasons=new Map(proofRows.map(w=>[w.address,pendingReason(JSON.parse(w.evidence))]));
+        ranking={updatedAt:new Date().toISOString(),complete:state.startedAt<=from&&!state.backlog&&!error,rows:rows.map((r,i)=>({rank:i+1,address:r.address,evidence:proofs.get(r.address)||[],pendingReason:r.pending?reasons.get(r.address):null,amountPi:decimal(r.units),type:[r.first?'1st':null,r.second?'2nd':null,r.later?'Later':null,r.pending?'Pending':null].filter(Boolean).join(' / ')}))};
       }catch(e){ranking={...(ranking||{rows:[]}),error:e.message};}
     }
     // The source balance is independent of receipts and never blocks their commit.
     let sourceAccount=lease.snapshot?JSON.parse(lease.snapshot).sourceAccount:null;
-    if(!options.historical&&(!sourceAccount||Date.now()-Date.parse(sourceAccount.attemptedAt||0)>=300000)){
+    if(!options.historical&&!api.paused&&(!sourceAccount||Date.now()-Date.parse(sourceAccount.attemptedAt||0)>=300000)){
       const attemptedAt=new Date().toISOString();
       try{
         const response=await fetch(API+'/accounts/'+SOURCE,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(10000)});
@@ -278,10 +297,20 @@ export async function collectFocus(env,options={}){
         sourceAccount={address:SOURCE,balance,checkedAt:attemptedAt,attemptedAt,error:null};
       }catch(e){sourceAccount={...(sourceAccount||{address:SOURCE,balance:null,checkedAt:null}),attemptedAt,error:e.message};}
     }
+    await api.persist();
+    if(state.startedAt&&Date.now()-now<42000){
+      try{state.audit=await auditStep(DB,state);delete state.auditError;}catch(e){state.auditError=e.message;}
+    }
+    let pendingSample=lease.snapshot?JSON.parse(lease.snapshot).pendingSample:null;
+    if(state.startedAt&&(!pendingSample||Date.now()-Date.parse(pendingSample.updatedAt)>=300000)){
+      try{const rows=(await DB.prepare('SELECT address,evidence,pending,retry_at FROM focus_wallets WHERE pending>0 ORDER BY retry_at,address LIMIT 20').all()).results||[];pendingSample={updatedAt:new Date().toISOString(),rows:rows.map(w=>{const proof=JSON.parse(w.evidence);return {address:w.address,receipts:w.pending,reason:pendingReason(proof),since:proof.pendingSince||null,retryAt:w.retry_at};})};}catch(e){pendingSample={...(pendingSample||{rows:[]}),error:e.message};}
+    }
+    accounting(state,2); // reserve final snapshot and lease release; never label these as measured.
+    const diagnostics={storage:{...state.storage,budget:limit,budgetUsed:state.writes},api:api.snapshot(),audit:publicAudit(state.audit),auditError:state.auditError||null};
     const volumes=state.startedAt&&state.volumeUnits?{firstPi:decimal(state.volumeUnits.first),secondPi:decimal(state.volumeUnits.second)}:null;
     const historical=options.historical?{since:options.since,targetAt:state.targetAt||null,scannedThrough:state.scannedThrough||null,pagesScanned:state.pagesScanned||0,sourceComplete:!!state.sourceComplete,initializing:!state.startedAt,scope:SOURCE}:null;
     const queue=queueMetrics(state.telemetry,state.counts?.pending||0,!!error||!!historyError||!!state.backlog||state.writes>=limit||state.historyWrites>=historyLimit||Number(state.historyPauseUntil||0)>Date.now());
-    const snapshot={version:46,updatedAt:new Date().toISOString(),queue,historical,volumes,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
+    const snapshot={version:47,diagnostics,pendingSample,updatedAt:new Date().toISOString(),queue,historical,volumes,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
     await DB.prepare('UPDATE focus_control SET snapshot=?1,state=?2,owner=NULL,lease_until=0 WHERE id=1 AND owner=?3').bind(JSON.stringify(snapshot),JSON.stringify(state),owner).run();
   }finally{
     await DB.prepare('UPDATE focus_control SET owner=NULL,lease_until=0 WHERE id=1 AND owner=?1').bind(owner).run();
