@@ -37,6 +37,22 @@ async function focusPage(address,cursor,order='asc',limit=200){
 }
 function counts(events){return {first:Number(events.some(e=>e.round===1)),second:Number(events.some(e=>e.round===2)),pending:events.filter(e=>e.round==null).length};}
 function decimal(units){const n=BigInt(units);return (n/10000000n)+'.'+String(n%10000000n).padStart(7,'0');}
+// Bounded hourly telemetry, persisted in the same atomic commits as receipts.
+export function queueMetrics(telemetry,pending,blocked=false,now=Date.now()){
+  const start=Number(telemetry?.since||now),elapsed=Math.max(0,now-start);
+  const buckets=(telemetry?.buckets||[]).filter(b=>b.at>now-3600000&&b.at<=now);
+  const resolved=buckets.reduce((n,b)=>n+b.resolved,0),added=buckets.reduce((n,b)=>n+b.added,0);
+  const ready=elapsed>=3600000,net=resolved-added;
+  return {updatedAt:new Date(now).toISOString(),observedMinutes:Math.min(60,Math.floor(elapsed/60000)),ready,resolved,added,net,pending,
+    trend:net>0?'shrinking':net<0?'growing':'stable',
+    etaHours:ready&&!blocked&&pending>0&&net>0?pending/net:null,blocked};
+}
+export function migrationProof(proof){
+  if(!proof)return [];
+  const events=proof.policyVersion===29&&proof.genesis&&!proof.ambiguous?(proof.events||[]).slice(0,2).map((e,i)=>({...e,round:i+1})):[];
+  if(!events.length&&proof.birthHash)events.push({hash:proof.birthHash,round:1,at:null});
+  return events.filter(e=>/^[a-f0-9]{64}$/i.test(e.hash));
+}
 export async function focusVerificationQueue(DB,ranking,now,size=4){
   size=Math.max(4,Math.min(80,Math.floor(size)||4));
   const prioritySize=Math.min(20,size-1);
@@ -58,6 +74,7 @@ export async function collectFocus(env,options={}){
   const lease=await DB.prepare('UPDATE focus_control SET owner=?1,lease_until=?2 WHERE id=1 AND lease_until<?3 RETURNING state,snapshot').bind(owner,now+180000,now).first();
   if(!lease)return;
   let state=JSON.parse(lease.state),error=null,historyError=null;
+  state.telemetry||={since:now,buckets:[]};
   const day=new Date().toISOString().slice(0,10);
   if(state.day!==day){state.day=day;state.writes=0;state.historyWrites=0;}
   state.writes=Number(state.writes||0)+8;
@@ -89,11 +106,17 @@ export async function collectFocus(env,options={}){
     const changed=[],wallets=[];
     next.counts={...state.counts};
     next.volumeUnits={...state.volumeUnits};
+    const minute=Math.floor(Date.now()/60000)*60000;
+    next.telemetry={since:state.telemetry.since,buckets:state.telemetry.buckets.filter(b=>b.at>minute-3600000).map(b=>({...b}))};
+    let bucket=next.telemetry.buckets.find(b=>b.at===minute);
+    if(!bucket){bucket={at:minute,added:0,resolved:0};next.telemetry.buckets.push(bucket);}
     for(const address of addresses){
       const before=previous.filter(e=>e.address===address),after=events.filter(e=>e.address===address),proof=evidence.get(address);
       for(const event of after){
         event.round=focusRound(proof,event.hash);
         const old=before.find(e=>e.hash===event.hash);
+        if(event.round==null&&(!old||old.round!=null))bucket.added++;
+        if(old&&old.round==null&&event.round!=null)bucket.resolved++;
         if(!old||old.units!==event.units||old.ids!==event.ids||old.round!==event.round)changed.push(event);
       }
       const a=counts(before),b=counts(after);
@@ -217,7 +240,8 @@ export async function collectFocus(env,options={}){
       try{
         const from=new Date(Date.now()-7*86400000).toISOString();
         const rows=(await DB.prepare('SELECT address,CAST(SUM(CAST(units AS INTEGER)) AS TEXT) AS units,MAX(round=1) AS first,MAX(round=2) AS second,MAX(round>2) AS later,MAX(round IS NULL) AS pending FROM focus_events WHERE at>=?1 GROUP BY address ORDER BY SUM(CAST(units AS INTEGER)) DESC,address LIMIT 20').bind(from).all()).results||[];
-        ranking={updatedAt:new Date().toISOString(),complete:state.startedAt<=from&&!state.backlog&&!error,rows:rows.map((r,i)=>({rank:i+1,address:r.address,amountPi:decimal(r.units),type:[r.first?'1st':null,r.second?'2nd':null,r.later?'Later':null,r.pending?'Pending':null].filter(Boolean).join(' / ')}))};
+        const proofs=new Map(((await DB.prepare('SELECT address,evidence FROM focus_wallets WHERE address IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(rows.map(r=>r.address))).all()).results||[]).map(w=>[w.address,migrationProof(JSON.parse(w.evidence))]));
+        ranking={updatedAt:new Date().toISOString(),complete:state.startedAt<=from&&!state.backlog&&!error,rows:rows.map((r,i)=>({rank:i+1,address:r.address,evidence:proofs.get(r.address)||[],amountPi:decimal(r.units),type:[r.first?'1st':null,r.second?'2nd':null,r.later?'Later':null,r.pending?'Pending':null].filter(Boolean).join(' / ')}))};
       }catch(e){ranking={...(ranking||{rows:[]}),error:e.message};}
     }
     // The source balance is independent of receipts and never blocks their commit.
@@ -235,7 +259,8 @@ export async function collectFocus(env,options={}){
     }
     const volumes=state.startedAt&&state.volumeUnits?{firstPi:decimal(state.volumeUnits.first),secondPi:decimal(state.volumeUnits.second)}:null;
     const historical=options.historical?{since:options.since,targetAt:state.targetAt||null,scannedThrough:state.scannedThrough||null,pagesScanned:state.pagesScanned||0,sourceComplete:!!state.sourceComplete,initializing:!state.startedAt,scope:SOURCE}:null;
-    const snapshot={version:44,historical,volumes,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
+    const queue=queueMetrics(state.telemetry,state.counts?.pending||0,!!error||!!historyError||!!state.backlog||state.writes>=limit||state.historyWrites>=historyLimit||Number(state.historyPauseUntil||0)>Date.now());
+    const snapshot={version:45,updatedAt:new Date().toISOString(),queue,historical,volumes,sourceAccount,lastMigrationAt:state.lastMigrationAt||null,lastMigrationHash:state.lastMigrationHash||null,startedAt:state.startedAt||null,checkedAt:state.checkedAt||null,counts:state.counts||null,backlog:!!state.backlog,error,historyError,ranking};
     await DB.prepare('UPDATE focus_control SET snapshot=?1,state=?2,owner=NULL,lease_until=0 WHERE id=1 AND owner=?3').bind(JSON.stringify(snapshot),JSON.stringify(state),owner).run();
   }finally{
     await DB.prepare('UPDATE focus_control SET owner=NULL,lease_until=0 WHERE id=1 AND owner=?1').bind(owner).run();

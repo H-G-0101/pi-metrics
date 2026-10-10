@@ -1,4 +1,16 @@
-# Pi Migration Monitor — v44
+# Pi Migration Monitor — v45
+
+## Novidade da v45 — evidências e progresso
+
+- Ritmo da fila ao longo da última hora: recebimentos adicionados e pendências classificadas, medidos separadamente em cada coletor.
+- Estimativa usa pendentes / redução líquida por hora; exige 60 minutos de observação. Não aparece com fila crescendo, coleta em recuperação, erros, pausa da API ou orçamento esgotado. É uma projeção, não prazo garantido.
+- Top 20 possui detalhes na classificação com links das primeiras duas migrações, quando as evidências salvas sustentam essas posições. A transação pode conter outros destinatários: conferir o beneficiário. Evidências fora do Top 20 não são consultadas pela interface.
+- Idades de atualização separadas para contadores, fila, Top 20, histórico e saldo de origem.
+- Barra histórica mostra fração do intervalo de datas percorrido, não percentual de eventos classificados ou estimativa de duração.
+
+Publique o pacote completo. Não altere o banco, os bindings nem os Crons. Dados e início do acompanhamento são preservados. Telemetria começa após a publicação e usa o estado existente, sem tabelas novas e sem reprocessar eventos antigos. O Top 20 atualiza suas evidências no próximo ciclo de atualização (aproximadamente cinco minutos). A interface não consulta a API da Pi ao abrir evidências; são links para o explorador. O coletor faz uma leitura adicional limitada às 20 carteiras quando reconstrói o ranking.
+
+Validação: testes locais do coletor e histórico, testes de estimativa e evidências, execução do JavaScript da interface com respostas simuladas e verificação de sintaxe. Não foi feita validação visual em navegador real nem publicação em produção neste ambiente.
 
 ## Novidade da v44 — clareza e apresentação
 

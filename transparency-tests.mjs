@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+import {queueMetrics,migrationProof} from './src/focus.mjs';
+const now=Date.now(),hash='a'.repeat(64),second='b'.repeat(64);
+const telemetry={since:now-3600000,buckets:[{at:now-120000,added:20,resolved:100},{at:now-3700000,added:1000,resolved:0}]};
+assert.equal(queueMetrics(telemetry,160,false,now).etaHours,2);
+assert.equal(queueMetrics(telemetry,160,true,now).etaHours,null);
+assert.equal(queueMetrics({...telemetry,since:now-1000},160,false,now).etaHours,null);
+assert.equal(queueMetrics({...telemetry,buckets:[{at:now,added:200,resolved:100}]},160,false,now).trend,'growing');
+assert.equal(queueMetrics(telemetry,0,false,now).etaHours,null);
+assert.equal(migrationProof({policyVersion:29,genesis:false,events:[{hash},{hash:second}]}).length,0);
+assert.deepEqual(migrationProof({birthHash:hash}),[{hash,round:1,at:null}]);
+assert.equal(migrationProof({policyVersion:29,genesis:true,events:[{hash},{hash:second}]}).at(-1).round,2);
+assert.equal(migrationProof({policyVersion:29,genesis:true,ambiguous:true,events:[{hash}]}).length,0);
+const html=readFileSync(new URL('./src/focus.html',import.meta.url),'utf8');
+const ids=[...html.matchAll(/id="([^"]+)"/g)].map(m=>m[1]);assert.equal(new Set(ids).size,ids.length);
+function element(){return {textContent:'',children:[],setAttribute(){},append(e){this.children.push(e)},replaceChildren(){this.children=[]},insertCell(){const e=element();this.children.push(e);return e;}};}
+const nodes=Object.fromEntries(ids.map(id=>[id,element()]));let offline=false;
+const stamp=new Date(now).toISOString();const q=queueMetrics(telemetry,160,false,now);
+const context={document:{hidden:false,getElementById(id){assert.ok(nodes[id],id);return nodes[id]},createElement:element,addEventListener(){}},navigator:{clipboard:{writeText:async()=>{}}},Intl,Date,Number,String,JSON,AbortSignal,setInterval(){},setTimeout(){},fetch:async()=>{if(offline)throw Error('Offline');return {ok:true,json:async()=>({version:45,startedAt:stamp,checkedAt:stamp,updatedAt:stamp,queue:q,counts:{first:1234,second:42,pending:160},volumes:{firstPi:'2000000',secondPi:'30000'},historical:{since:'2026-02-01T00:00:00Z',scannedThrough:'2026-02-02T00:00:00Z',targetAt:'2026-02-03T00:00:00Z'},ranking:{updatedAt:stamp,complete:true,rows:[{rank:1,address:'G'.repeat(56),type:'2nd',amountPi:'12345',evidence:[{round:1,hash},{round:2,hash:second}]}]}})}}};
+vm.createContext(context);vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1],context);await new Promise(r=>setImmediate(r));
+assert.equal(nodes.first.textContent,'1.23K');assert.equal(nodes.firstPi.textContent,'2M Pi');assert.equal(nodes.historyBar.value,50);assert.match(nodes.queueEta.textContent,/2 hours/);
+const proof=nodes.rows.children[0].children[2].children[0];assert.equal(proof.children.length,4);assert.match(proof.children[3].href,new RegExp(second));
+offline=true;await vm.runInContext('refresh()',context);assert.equal(nodes.health.textContent,'Unavailable');assert.equal(nodes.first.textContent,'1.23K');
+console.log('PASS v45: hourly window, warm-up, growth, pauses, proof safeguards, UI evidence, date coverage, compact values and retained data on failure');
